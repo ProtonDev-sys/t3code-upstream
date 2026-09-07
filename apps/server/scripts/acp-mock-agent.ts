@@ -1013,6 +1013,32 @@ const program = Effect.gen(function* () {
                 description: index === 0 ? "Read package metadata" : "Read it again",
               },
               content: [
+                ...(process.env.T3_ACP_PERMISSION_RESOURCE === "1"
+                  ? ([
+                      {
+                        type: "content",
+                        content: {
+                          type: "resource",
+                          resource: { uri: "urn:permission:notes", text: "Review these notes" },
+                          _meta: { secret: "permission-resource-metadata" },
+                        },
+                      },
+                      {
+                        type: "content",
+                        content: {
+                          type: "resource",
+                          resource: { uri: "urn:permission:binary", blob: "permission-binary" },
+                        },
+                      },
+                      {
+                        type: "content",
+                        content: {
+                          type: "resource",
+                          resource: { uri: "urn:permission:oversized", text: "x".repeat(8_001) },
+                        },
+                      },
+                    ] satisfies AcpSchema.ToolCallContent[])
+                  : []),
                 {
                   type: "content",
                   content: {
@@ -1301,7 +1327,8 @@ const program = Effect.gen(function* () {
           sessionId: requestedSessionId,
           update: {
             sessionUpdate: "usage_update",
-            used: 12_000,
+            used:
+              process.env.T3_ACP_COMPACT_USAGE === "1" ? (promptCount === 1 ? 600 : 100) : 12_000,
             size: 200_000,
             cost: { amount: 0.02, currency: "USD" },
           },

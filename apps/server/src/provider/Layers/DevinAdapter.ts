@@ -52,7 +52,7 @@ import {
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from "../Errors.ts";
-import { acpPermissionOutcome, mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
+import { mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
 import type * as AcpSessionRuntime from "../acp/AcpSessionRuntime.ts";
 import {
   makeAcpAssistantItemEvent,
@@ -159,6 +159,7 @@ export interface DevinAdapterLiveOptions {
 interface PendingApproval {
   readonly decision: Deferred.Deferred<ProviderApprovalDecision>;
   readonly kind: string | "unknown";
+  readonly options: EffectAcpSchema.RequestPermissionRequest["options"];
 }
 
 interface PendingUserInput {
@@ -360,6 +361,53 @@ function sanitizeDevinToolCallRawPayload(rawPayload: unknown, toolCall: AcpToolC
   };
 }
 
+function sanitizeDevinPermissionRequest(params: EffectAcpSchema.RequestPermissionRequest) {
+  const permissionRequest = parsePermissionRequest(params);
+  if (!params.toolCall.content?.some(isDevinResourceContent)) {
+    return { permissionRequest, payload: params };
+  }
+  const toolCall = permissionRequest.toolCall
+    ? sanitizeDevinToolCall(permissionRequest.toolCall)
+    : undefined;
+  const metadata: Record<string, unknown> = {};
+  for (const field of DEVIN_TOOL_CALL_RAW_METADATA_FIELDS) {
+    const value = boundedDevinMetadata(Reflect.get(params.toolCall, field));
+    if (value !== undefined) metadata[field] = value;
+  }
+  if (toolCall?.data.resource !== undefined) metadata.resource = toolCall.data.resource;
+  const detail = boundedDevinMetadata(permissionRequest.detail);
+  return {
+    permissionRequest: {
+      kind: permissionRequest.kind,
+      ...(detail !== undefined ? { detail } : {}),
+    },
+    payload: {
+      sessionId: boundedDevinMetadata(params.sessionId),
+      toolCall: metadata,
+      options: params.options.map(({ optionId, name, kind }) => ({
+        optionId: boundedDevinMetadata(optionId),
+        name: boundedDevinMetadata(name),
+        kind,
+      })),
+    },
+  };
+}
+
+function selectDevinPermissionOptionId(
+  options: EffectAcpSchema.RequestPermissionRequest["options"],
+  decision: ProviderApprovalDecision,
+): string | undefined {
+  const kind =
+    decision === "acceptForSession" || decision === "acceptAlways"
+      ? "allow_always"
+      : decision === "accept"
+        ? "allow_once"
+        : decision === "decline"
+          ? "reject_once"
+          : undefined;
+  return options.find((option) => option.kind === kind)?.optionId;
+}
+
 function parseDevinResume(raw: unknown): { sessionId: string } | undefined {
   if (!isRecord(raw)) return undefined;
   if (raw.schemaVersion !== DEVIN_RESUME_VERSION) return undefined;
@@ -486,17 +534,10 @@ function applyRequestedSessionConfiguration<E>(input: {
 function selectAutoApprovedPermissionOption(
   request: EffectAcpSchema.RequestPermissionRequest,
 ): string | undefined {
-  const allowAlwaysOption = request.options.find((option) => option.kind === "allow_always");
-  if (typeof allowAlwaysOption?.optionId === "string" && allowAlwaysOption.optionId.trim()) {
-    return allowAlwaysOption.optionId.trim();
-  }
-
-  const allowOnceOption = request.options.find((option) => option.kind === "allow_once");
-  if (typeof allowOnceOption?.optionId === "string" && allowOnceOption.optionId.trim()) {
-    return allowOnceOption.optionId.trim();
-  }
-
-  return undefined;
+  return (
+    selectDevinPermissionOptionId(request.options, "acceptForSession") ??
+    selectDevinPermissionOptionId(request.options, "accept")
+  );
 }
 
 function mapPromptTimeout(
@@ -742,7 +783,7 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
       rawPayload: unknown,
     ) =>
       Effect.gen(function* () {
-        const usedTokens = Math.max(nonNegativeInteger(update.used), ctx.totalProcessedTokens);
+        const usedTokens = nonNegativeInteger(update.used);
         const reportedMaxTokens = nonNegativeInteger(update.size);
         const maxTokens =
           reportedMaxTokens > 0
@@ -764,6 +805,9 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
 
         const usage: ThreadTokenUsageSnapshot = {
           usedTokens,
+          ...(ctx.totalProcessedTokens > 0
+            ? { totalProcessedTokens: ctx.totalProcessedTokens }
+            : {}),
           ...(maxTokens > 0 ? { maxTokens } : {}),
           ...((ctx.activeModelUid ?? ctx.session.model)
             ? { model: ctx.activeModelUid ?? ctx.session.model }
@@ -805,7 +849,7 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
         ctx.totalProcessedTokens = totalProcessedTokens;
         ctx.lastAcpUsage = current;
 
-        const usedTokens = Math.max(ctx.lastContextWindowUsed ?? 0, current.totalTokens);
+        const usedTokens = ctx.lastContextWindowUsed ?? 0;
         const maxTokens = ctx.lastContextWindowSize;
         const usage: ThreadTokenUsageSnapshot = {
           usedTokens,
@@ -861,10 +905,11 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
         yield* Effect.ignore(Scope.close(ctx.scope, Exit.void));
       });
 
-    // Spawns a new ACP runtime, wires handlers, starts it, and forks the
-    // notification consumer. Returns the started result and the new scope.
+    // Spawns and starts a runtime in the caller's scope. The caller retains
+    // cleanup ownership until configuration and notification setup succeed.
     // Shared by startSession and the model-change restart path.
     const createAcpRuntime = (input: {
+      readonly scope: Scope.Closeable;
       readonly threadId: ThreadId;
       readonly cwd: string;
       readonly runtimeMode: RuntimeMode;
@@ -876,12 +921,11 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
       {
         readonly acp: AcpSessionRuntime.AcpSessionRuntime["Service"];
         readonly started: AcpSessionRuntime.AcpSessionRuntimeStartResult;
-        readonly scope: Scope.Closeable;
       },
       ProviderAdapterError
     > =>
       Effect.gen(function* () {
-        const sessionScope = yield* Scope.make("sequential");
+        const sessionScope = input.scope;
         const acpNativeLoggers = makeAcpNativeLoggers({
           nativeEventLogger,
           provider: PROVIDER,
@@ -943,10 +987,11 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
           yield* acp.handleRequestPermission((params) =>
             mapExtensionFailure(
               Effect.gen(function* () {
+                const { permissionRequest, payload } = sanitizeDevinPermissionRequest(params);
                 yield* logNative(
                   input.threadId,
                   "session/request_permission",
-                  params,
+                  payload,
                   "acp.jsonrpc",
                 );
                 if (input.runtimeMode === "full-access") {
@@ -960,14 +1005,15 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
                     };
                   }
                 }
-                const permissionRequest = parsePermissionRequest(params);
                 const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
                 const runtimeRequestId = RuntimeRequestId.make(requestId);
                 const decision = yield* Deferred.make<ProviderApprovalDecision>();
-                input.pendingApprovals.set(requestId, {
+                const pending = {
                   decision,
                   kind: permissionRequest.kind,
-                });
+                  options: params.options,
+                };
+                input.pendingApprovals.set(requestId, pending);
                 yield* offerRuntimeEvent(
                   makeAcpRequestOpenedEvent({
                     stamp: yield* makeEventStamp(),
@@ -978,12 +1024,12 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
                     permissionRequest,
                     detail:
                       permissionRequest.detail ??
-                      encodeJsonStringForDiagnostics(params)?.slice(0, 2000) ??
+                      encodeJsonStringForDiagnostics(payload)?.slice(0, 2000) ??
                       "[unserializable params]",
-                    args: params,
+                    args: payload,
                     source: "acp.jsonrpc",
                     method: "session/request_permission",
-                    rawPayload: params,
+                    rawPayload: payload,
                   }),
                 );
                 const resolved = yield* Deferred.await(decision);
@@ -999,13 +1045,14 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
                     decision: resolved,
                   }),
                 );
+                const optionId = selectDevinPermissionOptionId(pending.options, resolved);
                 return {
                   outcome:
-                    resolved === "cancel"
+                    optionId === undefined
                       ? ({ outcome: "cancelled" } as const)
                       : {
                           outcome: "selected" as const,
-                          optionId: acpPermissionOutcome(resolved),
+                          optionId,
                         },
                 };
               }),
@@ -1018,7 +1065,7 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
           ),
         );
 
-        return { acp, started, scope: sessionScope };
+        return { acp, started };
       });
 
     // Forks the notification consumer into the session scope. The ctx must
@@ -1142,13 +1189,15 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
           const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>();
           const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>();
           const ctxRef: { current: DevinSessionContext | undefined } = { current: undefined };
+          const sessionScope = yield* Scope.make("sequential");
+          let sessionScopeTransferred = false;
+          yield* Effect.addFinalizer(() =>
+            sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
+          );
 
           const resumeSessionId = parseDevinResume(input.resumeCursor)?.sessionId;
-          const {
-            acp,
-            started,
+          const { acp, started } = yield* createAcpRuntime({
             scope: sessionScope,
-          } = yield* createAcpRuntime({
             threadId: input.threadId,
             cwd,
             runtimeMode: input.runtimeMode,
@@ -1212,6 +1261,7 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
           const nf = yield* startNotificationFiber(ctx);
           ctx.notificationFiber = nf;
           sessions.set(input.threadId, ctx);
+          sessionScopeTransferred = true;
 
           yield* offerRuntimeEvent({
             type: "session.started",
@@ -1260,12 +1310,17 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
 
         yield* teardownAcpRuntime(ctx);
 
+        const newScope = yield* Scope.make("sequential");
+        let sessionScopeTransferred = false;
+        yield* Effect.addFinalizer(() => {
+          if (sessionScopeTransferred) return Effect.void;
+          ctx.stopped = true;
+          sessions.delete(ctx.threadId);
+          return Scope.close(newScope, Exit.void);
+        });
         const ctxRef: { current: DevinSessionContext | undefined } = { current: ctx };
-        const {
-          acp,
-          started,
+        const { acp, started } = yield* createAcpRuntime({
           scope: newScope,
-        } = yield* createAcpRuntime({
           threadId: ctx.threadId,
           cwd: ctx.session.cwd ?? process.cwd(),
           runtimeMode: ctx.session.runtimeMode,
@@ -1275,15 +1330,7 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
           pendingApprovals: ctx.pendingApprovals,
           pendingUserInputs: ctx.pendingUserInputs,
           ctxRef,
-        }).pipe(
-          Effect.mapError((error) => {
-            // If restart fails, the session is in a bad state — mark it
-            // stopped so the user gets a clear error on next use.
-            ctx.stopped = true;
-            sessions.delete(ctx.threadId);
-            return error;
-          }),
-        );
+        });
 
         // Apply the new model to the fresh session. `newModel` is the base
         // (group) slug; the reasoning option is folded in to form the full
@@ -1311,6 +1358,7 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
 
         const nf = yield* startNotificationFiber(ctx);
         ctx.notificationFiber = nf;
+        sessionScopeTransferred = true;
 
         yield* offerRuntimeEvent({
           type: "session.state.changed",
@@ -1319,7 +1367,7 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
           threadId: ctx.threadId,
           payload: { state: "ready", reason: "Devin session ready after model change" },
         });
-      });
+      }).pipe(Effect.scoped);
 
     const sendTurn: DevinAdapterShape["sendTurn"] = (input) =>
       Effect.acquireUseRelease(
@@ -1655,6 +1703,16 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
             detail: `Unknown pending approval request: ${requestId}`,
           });
         }
+        if (
+          decision !== "cancel" &&
+          selectDevinPermissionOptionId(pending.options, decision) === undefined
+        ) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "session/request_permission",
+            detail: `Devin did not advertise an option for approval decision '${decision}'.`,
+          });
+        }
         yield* Deferred.succeed(pending.decision, decision);
       });
 
@@ -1682,20 +1740,14 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
         return { threadId, turns: ctx.turns };
       });
 
-    const rollbackThread: DevinAdapterShape["rollbackThread"] = (threadId, numTurns) =>
-      Effect.gen(function* () {
-        const ctx = yield* requireSession(threadId);
-        if (!Number.isInteger(numTurns) || numTurns < 1) {
-          return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
-            operation: "rollbackThread",
-            issue: "numTurns must be an integer >= 1.",
-          });
-        }
-        const nextLength = Math.max(0, ctx.turns.length - numTurns);
-        ctx.turns.splice(nextLength);
-        return { threadId, turns: ctx.turns };
-      });
+    const rollbackThread: DevinAdapterShape["rollbackThread"] = () =>
+      Effect.fail(
+        new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "rollbackThread",
+          issue: "Devin does not support conversation rewind. Start a new thread instead.",
+        }),
+      );
 
     const stopSession: DevinAdapterShape["stopSession"] = (threadId) =>
       withThreadLock(
@@ -1732,7 +1784,7 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: "in-session" },
+      capabilities: { sessionModelSwitch: "in-session", supportsConversationRollback: false },
       startSession,
       sendTurn,
       interruptTurn,

@@ -1,6 +1,6 @@
 # Devin ACP Capability Parity Design
 
-**Status:** Draft for written-spec review  
+**Status:** Draft for written-spec review\
 **Date:** 2026-09-07
 
 ## Goal

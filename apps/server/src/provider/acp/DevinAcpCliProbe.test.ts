@@ -63,6 +63,7 @@ import {
 
 const configuredBinary = process.env.T3_DEVIN_BINARY_PATH?.trim() || "devin";
 const decodeDevinSettings = Schema.decodeSync(DevinSettings);
+const encodeUnknownJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 const makeProbeSettings = () =>
   decodeDevinSettings({
@@ -110,7 +111,7 @@ const emitCapture = (capture: DevinAcpCapture | undefined, force = false) =>
     if (!capture || (!captureEnabled && !force)) return;
     const records = selectDevinOptionalContent(capture.records());
     process.stderr.write(
-      `${JSON.stringify({
+      `${encodeUnknownJson({
         optionalContent: records.length > 0 ? records : DEVIN_OPTIONAL_CONTENT_UNSUPPORTED_FIXTURE,
       })}\n`,
     );
@@ -292,7 +293,7 @@ describe.runIf(process.env.T3_DEVIN_MCP_SMOKE === "1")("Devin MCP smoke", () => 
                       "mcp-protocol-version": "2025-06-18",
                     }),
               },
-              body: HttpBody.text(JSON.stringify(body), "application/json"),
+              body: HttpBody.text(encodeUnknownJson(body), "application/json"),
             });
 
           const initializeResponse = yield* postMcp({
@@ -370,7 +371,7 @@ describe.runIf(process.env.T3_DEVIN_MCP_SMOKE === "1")("Devin MCP smoke", () => 
             nativeEventLogger: {
               filePath: "devin-mcp-smoke-native-events",
               write: (event) => Effect.sync(() => nativeAcpEvents.push(event)),
-              close: Effect.void,
+              close: () => Effect.void,
             },
           });
           yield* Effect.addFinalizer(() => adapter.stopSession(threadId).pipe(Effect.ignore));

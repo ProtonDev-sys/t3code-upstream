@@ -16,11 +16,14 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { isHostWindows } from "@t3tools/shared/hostProcess";
 import {
+  ApprovalRequestId,
   EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -47,6 +50,7 @@ const mockAgentPath = NodePath.join(__dirname, "../../../scripts/acp-mock-agent.
 const mockAgentCommand = process.execPath;
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 const encodeUnknownJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+const decodeUnknownJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 
 const makeMockDevinWrapper = Effect.fn("makeMockDevinWrapper")(function* (
   extraEnv?: Record<string, string>,
@@ -163,6 +167,238 @@ it("settles each steered prompt lease exactly once", () => {
 // Effect.timeout and Effect.sleep use the real wall clock — which is what
 // these integration tests need since they spawn real child processes.
 it.layer(devinAdapterTestLayer, { excludeTestServices: true })("DevinAdapterLive", (it) => {
+  it.effect("rejects unsupported conversation rollback without changing local history", () =>
+    Effect.gen(function* () {
+      const adapter = yield* makeTestAdapter(yield* makeMockDevinWrapper());
+      const threadId = ThreadId.make("devin-rollback");
+      yield* adapter.startSession({ threadId, cwd: process.cwd(), runtimeMode: "full-access" });
+      yield* adapter.sendTurn({ threadId, input: "keep this turn" });
+      const before = structuredClone(yield* adapter.readThread(threadId));
+      assert.isNotEmpty(before.turns);
+      const result = yield* adapter.rollbackThread(threadId, 1).pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(result));
+      assert.equal(adapter.capabilities.supportsConversationRollback, false);
+      assert.deepEqual(yield* adapter.readThread(threadId), before);
+    }),
+  );
+
+  for (const stage of [
+    "spawn",
+    "start",
+    "configure",
+    "restart-start",
+    "restart-configure",
+  ] as const) {
+    it.effect(`closes the independent runtime scope on ${stage} failure`, () =>
+      Effect.gen(function* () {
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const scopes: Scope.Scope[] = [];
+        let closed = 0;
+        const trackedSpawner = ChildProcessSpawner.make((command) =>
+          Effect.gen(function* () {
+            scopes.push(yield* Effect.scope);
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                closed += 1;
+              }),
+            );
+            if (stage === "spawn")
+              return yield* PlatformError.systemError({
+                _tag: "Unknown",
+                module: "ChildProcess",
+                method: "spawn",
+                description: "test spawn failure",
+              });
+            return yield* spawner.spawn(command);
+          }),
+        );
+        const goodWrapper = yield* makeMockDevinWrapper();
+        const failingWrapper = yield* makeMockDevinWrapper(
+          stage.endsWith("start")
+            ? { T3_ACP_FAIL_LOAD_SESSION: "1" }
+            : { T3_ACP_FAIL_SET_CONFIG_OPTION: "1" },
+        );
+        const restart = stage.startsWith("restart");
+        let binaryPath = restart ? goodWrapper : failingWrapper;
+        const adapter = yield* makeTestAdapter(binaryPath, {
+          resolveSettings: Effect.sync(() =>
+            decodeDevinSettings({ enabled: true, binaryPath, customModels: [] }),
+          ),
+        }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, trackedSpawner));
+        // Red runs must also release the scopes whose missing finalizers this test detects.
+        yield* Effect.addFinalizer(() =>
+          Effect.forEach(scopes, (scope) => Scope.close(scope, Exit.void), { discard: true }),
+        );
+        const threadId = ThreadId.make(`devin-failure-${stage}`);
+        const start = adapter.startSession({
+          threadId,
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+          modelSelection: devinModelSelection(restart ? "default" : "composer-2"),
+          ...(stage === "start"
+            ? { resumeCursor: { schemaVersion: 1, sessionId: "prior-session" } }
+            : {}),
+        });
+        if (restart) yield* start;
+        binaryPath = failingWrapper;
+        const operation = restart
+          ? adapter
+              .sendTurn({
+                threadId,
+                input: "change model",
+                modelSelection: devinModelSelection("composer-2"),
+              })
+              .pipe(Effect.asVoid)
+          : start.pipe(Effect.asVoid);
+        const result = yield* Effect.exit(operation);
+        assert.isTrue(Exit.isFailure(result));
+        assert.equal(closed, restart ? 2 : 1);
+        assert.isFalse(yield* adapter.hasSession(threadId));
+        assert.isEmpty(yield* adapter.listSessions());
+      }),
+    );
+  }
+
+  for (const [decision, optionId] of [
+    ["accept", "native-allow-once"],
+    ["acceptForSession", "native-allow-always"],
+    ["acceptAlways", "native-allow-always"],
+    ["decline", "native-reject"],
+    ["cancel", undefined],
+  ] as const) {
+    it.effect(
+      `resolves ${decision} with advertised ACP permission options and bounded resources`,
+      () =>
+        Effect.gen(function* () {
+          const wrapperPath = yield* makeMockDevinWrapper();
+          const logPath = NodePath.join(NodePath.dirname(wrapperPath), "requests.log");
+          const binaryPath = yield* makeMockDevinWrapper({
+            T3_ACP_REQUEST_LOG_PATH: logPath,
+            T3_ACP_EMIT_TOOL_CALLS: "1",
+            T3_ACP_PERMISSION_RESOURCE: "1",
+            T3_ACP_ALLOW_ONCE_OPTION_ID: "native-allow-once",
+            T3_ACP_ALLOW_ALWAYS_OPTION_ID: "native-allow-always",
+            T3_ACP_REJECT_ONCE_OPTION_ID: "native-reject",
+            T3_ACP_OMIT_ALLOW_ALWAYS: decision === "cancel" ? "1" : "0",
+          });
+          const nativeLogs: unknown[] = [];
+          const adapter = yield* makeTestAdapter(binaryPath, {
+            nativeEventLogger: {
+              filePath: logPath,
+              write: (event) => Effect.sync(() => nativeLogs.push(event)),
+              close: () => Effect.void,
+            },
+          });
+          const threadId = ThreadId.make(`devin-approval-${decision}`);
+          const opened =
+            yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: "request.opened" }>>();
+          yield* Stream.runForEach(adapter.streamEvents, (event) =>
+            event.type === "request.opened"
+              ? Deferred.succeed(opened, event).pipe(
+                  Effect.andThen(
+                    decision === "cancel"
+                      ? adapter
+                          .respondToRequest(
+                            threadId,
+                            ApprovalRequestId.make(String(event.requestId)),
+                            "acceptForSession",
+                          )
+                          .pipe(
+                            Effect.flip,
+                            Effect.tap((error) =>
+                              Effect.sync(() => assert.include(error.message, "did not advertise")),
+                            ),
+                          )
+                      : Effect.void,
+                  ),
+                  Effect.andThen(
+                    adapter.respondToRequest(
+                      threadId,
+                      ApprovalRequestId.make(String(event.requestId)),
+                      decision,
+                    ),
+                  ),
+                )
+              : Effect.void,
+          ).pipe(Effect.forkChild);
+          yield* adapter.startSession({
+            threadId,
+            cwd: process.cwd(),
+            runtimeMode: "approval-required",
+          });
+          yield* adapter.sendTurn({ threadId, input: "review resource" });
+          const request = yield* Deferred.await(opened);
+          assert.isTrue(containsString(request.payload.args, "urn:permission:notes"));
+          assert.isTrue(containsString(request.payload.args, "Review these notes"));
+          assert.deepEqual(request.raw?.payload, request.payload.args);
+          for (const excluded of [
+            "permission-binary",
+            "permission-resource-metadata",
+            "urn:permission:oversized",
+            "x".repeat(8_001),
+          ]) {
+            assert.isFalse(containsString(request, excluded), excluded.slice(0, 40));
+            assert.isFalse(containsString(nativeLogs, excluded), excluded.slice(0, 40));
+          }
+          const requestLog = yield* Effect.promise(() => NodeFSP.readFile(logPath, "utf8"));
+          const requests = yield* Effect.forEach(requestLog.trim().split("\n"), (line) =>
+            decodeUnknownJson(line),
+          );
+          assert.isTrue(
+            requests.some(
+              Schema.is(
+                Schema.Struct({
+                  result: Schema.Struct({
+                    outcome:
+                      optionId === undefined
+                        ? Schema.Struct({ outcome: Schema.Literal("cancelled") })
+                        : Schema.Struct({
+                            outcome: Schema.Literal("selected"),
+                            optionId: Schema.Literal(optionId),
+                          }),
+                  }),
+                }),
+              ),
+            ),
+          );
+        }),
+    );
+  }
+
+  it.effect("keeps compacted ACP occupancy separate from lifetime processed tokens", () =>
+    Effect.gen(function* () {
+      const adapter = yield* makeTestAdapter(
+        yield* makeMockDevinWrapper({ T3_ACP_EMIT_USAGE_UPDATE: "1", T3_ACP_COMPACT_USAGE: "1" }),
+      );
+      const threadId = ThreadId.make("devin-compacted-context");
+      const usageEvents: Extract<ProviderRuntimeEvent, { type: "thread.token-usage.updated" }>[] =
+        [];
+      const completed = yield* Deferred.make<void>();
+      let turns = 0;
+      yield* Stream.runForEach(adapter.streamEvents, (event) => {
+        if (event.type === "thread.token-usage.updated") usageEvents.push(event);
+        if (event.type === "turn.completed" && ++turns === 2)
+          return Deferred.succeed(completed, undefined);
+        return Effect.void;
+      }).pipe(Effect.forkChild);
+      yield* adapter.startSession({
+        threadId,
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: devinModelSelection("default"),
+      });
+      yield* adapter.sendTurn({ threadId, input: "first" });
+      yield* adapter.sendTurn({ threadId, input: "compact" });
+      yield* Deferred.await(completed);
+      assert.deepEqual(
+        usageEvents.map((event) => event.payload.usage.usedTokens),
+        [600, 600, 100, 100],
+      );
+      assert.equal(usageEvents.at(-1)?.payload.usage.totalProcessedTokens, 1_140);
+      assert.equal(usageEvents.at(-1)?.payload.usage.lastUsedTokens, 0);
+    }),
+  );
+
   it.effect("starts a session and maps mock ACP prompt flow to runtime events", () =>
     Effect.gen(function* () {
       const wrapperPath = yield* makeMockDevinWrapper();
