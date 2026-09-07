@@ -328,9 +328,15 @@ describe.runIf(process.env.T3_DEVIN_MCP_SMOKE === "1")("Devin MCP smoke", () => 
           }).pipe(Effect.forkScoped);
           yield* Effect.yieldNow;
 
+          const nativeAcpEvents: unknown[] = [];
           const adapter = yield* makeDevinAdapter(makeProbeSettings(), {
             environment: process.env,
             promptTimeout: Duration.seconds(180),
+            nativeEventLogger: {
+              filePath: "devin-mcp-smoke-native-events",
+              write: (event) => Effect.sync(() => nativeAcpEvents.push(event)),
+              close: Effect.void,
+            },
           });
           yield* Effect.addFinalizer(() => adapter.stopSession(threadId).pipe(Effect.ignore));
           const runtimeEvents: ProviderRuntimeEvent[] = [];
@@ -351,6 +357,24 @@ describe.runIf(process.env.T3_DEVIN_MCP_SMOKE === "1")("Devin MCP smoke", () => 
             runtimeMode: "full-access",
             modelSelection: { instanceId: providerInstanceId, model: "adaptive" },
           });
+          const sessionNewRequest = nativeAcpEvents
+            .map(
+              (record) =>
+                record as {
+                  readonly event?: {
+                    readonly kind?: unknown;
+                    readonly payload?: {
+                      readonly method?: unknown;
+                      readonly request?: { readonly fieldCount?: unknown };
+                    };
+                  };
+                },
+            )
+            .find(
+              (record) =>
+                record.event?.kind === "request" && record.event.payload?.method === "session/new",
+            );
+          expect(sessionNewRequest?.event?.payload?.request?.fieldCount).toBe(2);
           yield* adapter.sendTurn({
             threadId,
             input:
@@ -362,8 +386,8 @@ describe.runIf(process.env.T3_DEVIN_MCP_SMOKE === "1")("Devin MCP smoke", () => 
             .filter((event) => event.type === "content.delta")
             .map((event) => event.payload.delta)
             .join("");
-          expect(assistantText).toContain("T3_DEVIN_MCP_OK");
           expect(requests).toHaveLength(1);
+          expect(assistantText).toContain("T3_DEVIN_MCP_OK");
           expect(
             requests.some(
               (request) => request.threadId === threadId && request.operation === "status",
