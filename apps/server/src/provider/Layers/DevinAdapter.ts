@@ -64,11 +64,13 @@ import {
   makeAcpToolCallEvent,
 } from "../acp/AcpCoreRuntimeEvents.ts";
 import {
+  type AcpToolCallState,
   type AcpSessionMode,
   type AcpSessionModeState,
   parsePermissionRequest,
 } from "../acp/AcpRuntimeModel.ts";
 import { makeAcpNativeLoggerFactory } from "../acp/AcpNativeLogging.ts";
+import { normalizeDevinResourceContent } from "../acp/DevinResourceSupport.ts";
 import {
   applyDevinAcpModelSelection,
   inferDevinContextWindowTokens,
@@ -268,6 +270,26 @@ function settlePendingUserInputsAsEmptyAnswers(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function withNormalizedDevinResource(toolCall: AcpToolCallState): AcpToolCallState {
+  const content = toolCall.data.content;
+  if (!Array.isArray(content)) {
+    return toolCall;
+  }
+  for (const entry of content) {
+    const normalized = normalizeDevinResourceContent(entry);
+    if (normalized.kind === "resource") {
+      return {
+        ...toolCall,
+        data: {
+          ...toolCall.data,
+          resource: normalized.resource,
+        },
+      };
+    }
+  }
+  return toolCall;
 }
 
 function parseDevinResume(raw: unknown): { sessionId: string } | undefined {
@@ -985,7 +1007,7 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
                     provider: PROVIDER,
                     threadId: ctx.threadId,
                     turnId: ctx.activeTurnId,
-                    toolCall: event.toolCall,
+                    toolCall: withNormalizedDevinResource(event.toolCall),
                     rawPayload: event.rawPayload,
                   }),
                 );

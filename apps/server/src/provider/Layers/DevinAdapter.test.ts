@@ -17,6 +17,7 @@ import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { isHostWindows } from "@t3tools/shared/hostProcess";
 import {
@@ -104,6 +105,17 @@ const devinModelSelection = (model: string) => ({
   model,
 });
 
+const devinResourceLinkFixture = {
+  type: "content",
+  content: {
+    type: "resource_link",
+    uri: "urn:acp:fixture:resource-link",
+    name: "schema fixture",
+    description: "typed protocol fixture",
+    mimeType: "text/markdown",
+  },
+} satisfies EffectAcpSchema.ToolCallContent;
+
 it("does not let a stale prompt lease consume a newer turn's accounting", () => {
   const firstTurnId = TurnId.make("devin-first-turn");
   const nextTurnId = TurnId.make("devin-next-turn");
@@ -185,6 +197,58 @@ it.layer(devinAdapterTestLayer, { excludeTestServices: true })("DevinAdapterLive
       }
 
       yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("retains normalized typed ACP resource data on the canonical tool event", () =>
+    Effect.gen(function* () {
+      const wrapperPath = yield* makeMockDevinWrapper({
+        T3_ACP_EMIT_DEVIN_RESOURCE_TOOL_CALL: "1",
+      });
+      const adapter = yield* makeTestAdapter(wrapperPath);
+      const threadId = ThreadId.make("devin-resource-tool-event");
+      const completedTool =
+        yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: "item.completed" }>>();
+      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        event.type === "item.completed" &&
+        String(event.threadId) === String(threadId) &&
+        String(event.itemId) === "devin-resource-tool"
+          ? Deferred.succeed(completedTool, event).pipe(Effect.ignore)
+          : Effect.void,
+      ).pipe(Effect.forkChild);
+
+      yield* Effect.gen(function* () {
+        yield* adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("devin"),
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+          modelSelection: devinModelSelection("default"),
+        });
+
+        yield* adapter.sendTurn({
+          threadId,
+          input: "emit typed resource fixture",
+          attachments: [],
+        });
+
+        const event = yield* Deferred.await(completedTool).pipe(Effect.timeout("5 seconds"));
+        assert.isDefined(event);
+        const data = event.payload.data as Record<string, unknown> | undefined;
+        assert.deepEqual(data?.resource, {
+          uri: devinResourceLinkFixture.content.uri,
+          name: devinResourceLinkFixture.content.name,
+          description: devinResourceLinkFixture.content.description,
+          mimeType: devinResourceLinkFixture.content.mimeType,
+        });
+      }).pipe(
+        Effect.ensuring(
+          Effect.gen(function* () {
+            yield* adapter.stopSession(threadId).pipe(Effect.ignore);
+            yield* Fiber.interrupt(runtimeEventsFiber);
+          }),
+        ),
+      );
     }),
   );
 
