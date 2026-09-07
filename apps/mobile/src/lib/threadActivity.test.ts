@@ -274,6 +274,39 @@ function makeThread(
 }
 
 describe("buildThreadFeed", () => {
+  it("projects canonical user-input activity into the existing message row", () => {
+    const thread = makeThread({
+      id: ThreadId.make("thread-user-input-activity"),
+      projectId: ProjectId.make("project-1"),
+      title: "User input activity",
+      activities: [
+        makeActivity({
+          id: EventId.make("user-input-requested"),
+          kind: "user-input.requested",
+          summary: "User input requested",
+          createdAt: "2026-09-01T00:00:00.000Z",
+          payload: {
+            requestId: "req-user-input",
+            questions: [singleSelectQuestion],
+          },
+        }),
+      ],
+    });
+
+    expect(buildThreadFeed(thread)).toMatchObject([
+      {
+        type: "activity-group",
+        activities: [
+          {
+            id: "user-input-requested",
+            icon: "message",
+            workEntry: { sourceActivityKind: "user-input.requested" },
+          },
+        ],
+      },
+    ]);
+  });
+
   it("reuses unchanged feed and presentation rows during an assistant text update", () => {
     const completedTurnId = TurnId.make("completed-turn");
     const activeTurnId = TurnId.make("active-turn");
