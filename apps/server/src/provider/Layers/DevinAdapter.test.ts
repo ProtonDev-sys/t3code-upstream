@@ -27,6 +27,7 @@ import {
   EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
+  type ProviderApprovalOption,
   type ProviderRuntimeEvent,
   ThreadId,
   TurnId,
@@ -328,6 +329,18 @@ it.layer(devinAdapterTestLayer, { excludeTestServices: true })("DevinAdapterLive
           });
           yield* adapter.sendTurn({ threadId, input: "review resource" });
           const request = yield* Deferred.await(opened);
+          const allowOnce: ProviderApprovalOption = { decision: "accept", label: "Allow once" };
+          const allowAlways: ProviderApprovalOption = {
+            decision: "acceptForSession",
+            label: "Allow always",
+          };
+          const reject: ProviderApprovalOption = { decision: "decline", label: "Reject" };
+          const cancel: ProviderApprovalOption = { decision: "cancel", label: "Cancel" };
+          const expectedOptions: ReadonlyArray<ProviderApprovalOption> =
+            decision === "cancel"
+              ? [allowOnce, reject, cancel]
+              : [allowOnce, allowAlways, reject, cancel];
+          assert.deepEqual(request.payload.options, expectedOptions);
           assert.isTrue(containsString(request.payload.args, "urn:permission:notes"));
           assert.isTrue(containsString(request.payload.args, "Review these notes"));
           assert.deepEqual(request.raw?.payload, request.payload.args);

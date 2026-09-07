@@ -7,6 +7,7 @@ import {
   type OrchestrationThreadActivity,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
+import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
 import { resolveWorkEntryToolPresentation } from "@t3tools/client-runtime/work-log/presentation";
 import {
   hasToolActivityData,
@@ -64,6 +65,33 @@ function makeActivity(overrides: {
     ...(overrides.sequence !== undefined ? { sequence: overrides.sequence } : {}),
   };
 }
+
+describe("pending approvals", () => {
+  it("preserves Devin's advertised options without adding unavailable session actions", () => {
+    const options = [
+      { decision: "accept", label: "Allow once" },
+      { decision: "decline", label: "Reject" },
+      { decision: "cancel", label: "Cancel" },
+    ];
+    const requested = makeActivity({
+      kind: "approval.requested",
+      payload: {
+        requestId: "devin-permission",
+        requestType: "command_execution_approval",
+        options,
+      },
+    });
+
+    expect(derivePendingRequests([requested]).approvals).toEqual([
+      {
+        requestId: "devin-permission",
+        requestKind: "command",
+        createdAt: requested.createdAt,
+        options,
+      },
+    ]);
+  });
+});
 
 describe("deriveActivePlanState", () => {
   it("returns the latest plan update for the active turn", () => {

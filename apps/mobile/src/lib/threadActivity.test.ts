@@ -60,6 +60,33 @@ const nativeQuestion = {
   allowCustomAnswer: false,
 } as const;
 
+describe("pending approvals", () => {
+  it("preserves Devin's advertised options without adding unavailable session actions", () => {
+    const options = [
+      { decision: "accept", label: "Allow once" },
+      { decision: "decline", label: "Reject" },
+      { decision: "cancel", label: "Cancel" },
+    ];
+    const requested = makeActivity({
+      kind: "approval.requested",
+      payload: {
+        requestId: "devin-permission",
+        requestType: "command_execution_approval",
+        options,
+      },
+    });
+
+    expect(derivePendingRequests([requested]).approvals).toEqual([
+      {
+        requestId: "devin-permission",
+        requestKind: "command",
+        createdAt: requested.createdAt,
+        options,
+      },
+    ]);
+  });
+});
+
 describe("pending user input answers", () => {
   it("accepts free-text answers to async questions without options", () => {
     const question = {

@@ -10,6 +10,7 @@ import {
   type ProviderOptionSelection,
   EventId,
   type ProviderApprovalDecision,
+  type ProviderApprovalOption,
   type ProviderInteractionMode,
   type ProviderRuntimeEvent,
   type ProviderSession,
@@ -406,6 +407,23 @@ function selectDevinPermissionOptionId(
           ? "reject_once"
           : undefined;
   return options.find((option) => option.kind === kind)?.optionId;
+}
+
+function devinApprovalOptions(
+  options: EffectAcpSchema.RequestPermissionRequest["options"],
+): ReadonlyArray<ProviderApprovalOption> {
+  const approvals: ProviderApprovalOption[] = [];
+  for (const decision of ["accept", "acceptForSession", "decline"] as const) {
+    const optionId = selectDevinPermissionOptionId(options, decision);
+    const option = options.find((entry) => entry.optionId === optionId);
+    const label = boundedDevinMetadata(option?.name)?.trim();
+    if (option?.optionId.trim() && label) {
+      approvals.push({ decision, label });
+    }
+  }
+  // ACP cancellation is always supported, even without a selectable native option.
+  approvals.push({ decision: "cancel", label: "Cancel" });
+  return approvals;
 }
 
 function parseDevinResume(raw: unknown): { sessionId: string } | undefined {
@@ -1022,6 +1040,7 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
                     turnId: input.ctxRef.current?.activeTurnId,
                     requestId: runtimeRequestId,
                     permissionRequest,
+                    approvalOptions: devinApprovalOptions(params.options),
                     detail:
                       permissionRequest.detail ??
                       encodeJsonStringForDiagnostics(payload)?.slice(0, 2000) ??
