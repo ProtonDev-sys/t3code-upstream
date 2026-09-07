@@ -56,7 +56,8 @@ import { spawnAndCollect } from "../providerSnapshot.ts";
 import { makeDevinAcpRuntime } from "./DevinAcpSupport.ts";
 import {
   DEVIN_OPTIONAL_CONTENT_UNSUPPORTED_FIXTURE,
-  makeDevinAcpCapture,
+  createDevinAcpCapture,
+  type DevinAcpCapture,
 } from "./DevinOptionalContentFixtures.test.ts";
 
 const configuredBinary = process.env.T3_DEVIN_BINARY_PATH?.trim() || "devin";
@@ -81,7 +82,7 @@ const runDevinCommand = (args: ReadonlyArray<string>) =>
     );
   });
 
-const makeProbeRuntime = (capture?: ReturnType<typeof makeDevinAcpCapture>) =>
+const makeProbeRuntime = (capture?: DevinAcpCapture) =>
   Effect.gen(function* () {
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     return yield* makeDevinAcpRuntime({
@@ -103,16 +104,10 @@ const makeProbeRuntime = (capture?: ReturnType<typeof makeDevinAcpCapture>) =>
 
 const captureEnabled = process.env.T3_DEVIN_ACP_CAPTURE === "1";
 
-const emitCapture = (capture: ReturnType<typeof makeDevinAcpCapture>, force = false) =>
+const emitCapture = (capture: DevinAcpCapture | undefined, force = false) =>
   Effect.sync(() => {
-    if (!captureEnabled && !force) return;
-    const records = capture
-      .records()
-      .filter((record) =>
-        ["resource link", "embedded resource", "elicitation", "child-agent update"].includes(
-          record.classification,
-        ),
-      );
+    if (!capture || (!captureEnabled && !force)) return;
+    const records = capture.records().filter((record) => record.classification !== "ordinary text");
     process.stderr.write(
       `${JSON.stringify({
         optionalContent: records.length > 0 ? records : DEVIN_OPTIONAL_CONTENT_UNSUPPORTED_FIXTURE,
@@ -177,7 +172,7 @@ describe.runIf(process.env.T3_DEVIN_ACP_PROBE === "1")("Devin ACP CLI probe", ()
   it.effect.skipIf(process.env.T3_DEVIN_LIVE_TURN !== "1")(
     "finishes a real Devin turn and streams its answer",
     () => {
-      const capture = makeDevinAcpCapture();
+      const capture = createDevinAcpCapture(captureEnabled);
       return Effect.gen(function* () {
         const runtime = yield* makeProbeRuntime(capture);
         yield* runtime.start();

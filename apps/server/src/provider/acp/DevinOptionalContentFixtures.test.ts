@@ -3,13 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 const MAX_CAPTURE_RECORD_BYTES = 512;
 const MAX_CAPTURE_RECORDS = 32;
 
-export type DevinOptionalContentClassification =
-  | "ordinary text"
-  | "resource link"
-  | "embedded resource"
-  | "elicitation"
-  | "child-agent update"
-  | "unsupported";
+export type DevinOptionalContentClassification = "ordinary text" | "unsupported";
 
 export interface DevinSanitizedAcpCapture {
   readonly method: "session/update" | "session/elicitation" | "unknown";
@@ -32,27 +26,6 @@ function safeTag(value: unknown): string | undefined {
   return typeof value === "string" && /^[A-Za-z][A-Za-z0-9._:-]{0,63}$/.test(value)
     ? value
     : undefined;
-}
-
-function classifyContent(
-  method: DevinSanitizedAcpCapture["method"],
-  updateType: string | undefined,
-  contentType: string | undefined,
-): DevinOptionalContentClassification {
-  if (method === "session/elicitation") return "elicitation";
-  if (updateType && /(?:child|sub)agent|agent[_-]spawn/iu.test(updateType)) {
-    return "child-agent update";
-  }
-  switch (contentType) {
-    case "text":
-      return "ordinary text";
-    case "resource_link":
-      return "resource link";
-    case "resource":
-      return "embedded resource";
-    default:
-      return "unsupported";
-  }
 }
 
 function boundedRecord(record: DevinSanitizedAcpCapture): DevinSanitizedAcpCapture {
@@ -96,11 +69,17 @@ export function captureDevinAcpUpdate(event: unknown): DevinSanitizedAcpCapture 
     method,
     ...(updateType ? { updateType } : {}),
     ...(contentType ? { contentType } : {}),
-    classification: classifyContent(method, updateType, contentType),
+    classification: contentType === "text" ? "ordinary text" : "unsupported",
   });
 }
 
-export function makeDevinAcpCapture() {
+export interface DevinAcpCapture {
+  readonly write: (event: unknown) => void;
+  readonly records: () => ReadonlyArray<DevinSanitizedAcpCapture>;
+}
+
+export function createDevinAcpCapture(enabled: boolean): DevinAcpCapture | undefined {
+  if (!enabled) return undefined;
   const records: DevinSanitizedAcpCapture[] = [];
   return {
     write(event: unknown): void {
@@ -115,7 +94,9 @@ export function makeDevinAcpCapture() {
 
 describe("Devin sanitized optional ACP fixtures", () => {
   it("redacts prompts, credentials, paths, environment values, and blobs", () => {
-    const capture = makeDevinAcpCapture();
+    const capture = createDevinAcpCapture(true);
+    expect(capture).toBeDefined();
+    if (!capture) return;
     capture.write({
       direction: "incoming",
       stage: "decoded",
@@ -153,7 +134,9 @@ describe("Devin sanitized optional ACP fixtures", () => {
   });
 
   it("bounds each record and the in-memory capture", () => {
-    const capture = makeDevinAcpCapture();
+    const capture = createDevinAcpCapture(true);
+    expect(capture).toBeDefined();
+    if (!capture) return;
     for (let index = 0; index < 40; index += 1) {
       capture.write({
         direction: "incoming",
@@ -164,7 +147,7 @@ describe("Devin sanitized optional ACP fixtures", () => {
             payload: {
               update: {
                 sessionUpdate: `not-safe-${"x".repeat(1_000)}-${index}`,
-                content: { type: "resource" },
+                content: { type: "unsupported" },
               },
             },
           },
@@ -180,32 +163,7 @@ describe("Devin sanitized optional ACP fixtures", () => {
     }
   });
 
-  it("classifies only observed ACP content shapes", () => {
-    const cases = [
-      ["text", "ordinary text"],
-      ["resource_link", "resource link"],
-      ["resource", "embedded resource"],
-    ] as const;
-    for (const [contentType, classification] of cases) {
-      expect(
-        captureDevinAcpUpdate({
-          direction: "incoming",
-          stage: "decoded",
-          payload: {
-            tag: "session/update",
-            payload: {
-              update: { sessionUpdate: "agent_message_chunk", content: { type: contentType } },
-            },
-          },
-        })?.classification,
-      ).toBe(classification);
-    }
-    expect(
-      captureDevinAcpUpdate({
-        direction: "incoming",
-        stage: "decoded",
-        payload: { tag: "session/elicitation", payload: {} },
-      })?.classification,
-    ).toBe("elicitation");
+  it("does not create capture state when capture is disabled", () => {
+    expect(createDevinAcpCapture(false)).toBeUndefined();
   });
 });
