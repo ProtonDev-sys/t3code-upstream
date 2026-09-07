@@ -11,6 +11,19 @@ export interface ExtractedToolActivityPresentation {
   readonly toolSource?: ToolActivitySource;
 }
 
+/**
+ * Keeps the bounded resource metadata that providers attach to an otherwise
+ * generic tool row. MCP rows retain their existing focused payload shape.
+ */
+export function extractToolActivityData(payloadValue: unknown): unknown {
+  const payload = asRecord(payloadValue);
+  const data = asRecord(payload?.data);
+  if (!data) return undefined;
+  if ("resource" in data) return data;
+  if (payload?.itemType !== "mcp_tool_call") return undefined;
+  return typeof data.toolName === "string" ? (data.item ?? data) : data.item;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)

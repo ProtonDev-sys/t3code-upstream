@@ -825,6 +825,40 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.toolLifecycleStatus).toBe("completed");
   });
 
+  it("retains canonical ACP resource metadata for generic tool activities", () => {
+    const data = {
+      toolCallId: "devin-resource-tool",
+      kind: "other",
+      resource: {
+        uri: "urn:acp:fixture:resource-link",
+        name: "schema fixture",
+        description: "typed protocol fixture",
+        mimeType: "text/markdown",
+      },
+      content: [
+        {
+          type: "content",
+          content: { type: "text", text: "ordinary tool output" },
+        },
+      ],
+    };
+    const [entry] = deriveWorkLogEntries([
+      makeActivity({
+        id: "devin-resource-tool",
+        kind: "tool.completed",
+        summary: "Resource fixture",
+        payload: {
+          itemType: "dynamic_tool_call",
+          status: "completed",
+          title: "Resource fixture",
+          data,
+        },
+      }),
+    ]);
+
+    expect(entry?.toolData).toBe(data);
+  });
+
   it("preserves MCP server, tool, arguments, and results for expanded display", () => {
     const item = {
       type: "mcpToolCall",

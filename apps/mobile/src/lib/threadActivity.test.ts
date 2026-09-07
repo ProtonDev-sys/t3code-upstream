@@ -1467,6 +1467,51 @@ describe("buildThreadFeed", () => {
     ]);
   });
 
+  it("retains canonical ACP resource metadata for generic tool activities", () => {
+    const data = {
+      toolCallId: "devin-resource-tool",
+      kind: "other",
+      resource: {
+        uri: "urn:acp:fixture:resource-link",
+        name: "schema fixture",
+        description: "typed protocol fixture",
+        mimeType: "text/markdown",
+      },
+      content: [
+        {
+          type: "content",
+          content: { type: "text", text: "ordinary tool output" },
+        },
+      ],
+    };
+    const thread = makeThread({
+      id: ThreadId.make("thread-devin-resource"),
+      projectId: ProjectId.make("project-1"),
+      title: "Devin resource",
+      activities: [
+        makeActivity({
+          id: EventId.make("devin-resource-tool"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Resource fixture",
+          createdAt: "2026-09-07T00:00:00.000Z",
+          payload: {
+            itemType: "dynamic_tool_call",
+            status: "completed",
+            title: "Resource fixture",
+            data,
+          },
+        }),
+      ],
+    });
+
+    const [group] = buildThreadFeed(thread);
+    expect(group).toMatchObject({
+      type: "activity-group",
+      activities: [{ workEntry: { toolData: data } }],
+    });
+  });
+
   it.each([
     {
       status: "completed",

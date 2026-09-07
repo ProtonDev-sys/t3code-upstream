@@ -1,8 +1,39 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import { extractToolActivityPresentation } from "./toolPresentation.ts";
+import { extractToolActivityData, extractToolActivityPresentation } from "./toolPresentation.ts";
+
+const devinResourceToolEvent = {
+  type: "item.completed",
+  payload: {
+    itemType: "dynamic_tool_call",
+    status: "completed",
+    title: "Resource fixture",
+    data: {
+      toolCallId: "devin-resource-tool",
+      kind: "other",
+      resource: {
+        uri: "urn:acp:fixture:resource-link",
+        name: "schema fixture",
+        description: "typed protocol fixture",
+        mimeType: "text/markdown",
+      },
+      content: [
+        {
+          type: "content",
+          content: { type: "text", text: "ordinary tool output" },
+        },
+      ],
+    },
+  },
+} as const;
 
 describe("extractToolActivityPresentation", () => {
+  it("retains canonical ACP resource metadata for generic tool activity", () => {
+    expect(extractToolActivityData(devinResourceToolEvent.payload)).toBe(
+      devinResourceToolEvent.payload.data,
+    );
+  });
+
   it("reads provider-neutral presentation fields", () => {
     expect(
       extractToolActivityPresentation({
