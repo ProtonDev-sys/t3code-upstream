@@ -59,6 +59,7 @@ export function captureDevinSubagentObservation(
 
   const payload = isRecord(message.payload) ? message.payload : undefined;
   const update = payload && isRecord(payload.update) ? payload.update : undefined;
+  if (update === undefined) return undefined;
   const updateType = typeof update?.sessionUpdate === "string" ? update.sessionUpdate : undefined;
   if (updateType === undefined || updateType.length > 64) return undefined;
 
