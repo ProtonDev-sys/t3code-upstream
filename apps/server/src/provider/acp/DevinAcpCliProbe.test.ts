@@ -57,6 +57,7 @@ import { makeDevinAcpRuntime } from "./DevinAcpSupport.ts";
 import {
   DEVIN_OPTIONAL_CONTENT_UNSUPPORTED_FIXTURE,
   createDevinAcpCapture,
+  selectDevinOptionalContent,
   type DevinAcpCapture,
 } from "./DevinOptionalContentFixtures.test.ts";
 
@@ -107,7 +108,7 @@ const captureEnabled = process.env.T3_DEVIN_ACP_CAPTURE === "1";
 const emitCapture = (capture: DevinAcpCapture | undefined, force = false) =>
   Effect.sync(() => {
     if (!capture || (!captureEnabled && !force)) return;
-    const records = capture.records().filter((record) => record.classification !== "ordinary text");
+    const records = selectDevinOptionalContent(capture.records());
     process.stderr.write(
       `${JSON.stringify({
         optionalContent: records.length > 0 ? records : DEVIN_OPTIONAL_CONTENT_UNSUPPORTED_FIXTURE,

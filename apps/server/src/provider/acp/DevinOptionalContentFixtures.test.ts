@@ -2,6 +2,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 const MAX_CAPTURE_RECORD_BYTES = 512;
 const MAX_CAPTURE_RECORDS = 32;
+const NON_OPTIONAL_UPDATE_TYPES = new Set([
+  "config_option_update",
+  "current_mode_update",
+  "available_commands_update",
+  "session_info_update",
+  "usage_update",
+]);
 
 export type DevinOptionalContentClassification = "ordinary text" | "unsupported";
 
@@ -76,6 +83,16 @@ export function captureDevinAcpUpdate(event: unknown): DevinSanitizedAcpCapture 
 export interface DevinAcpCapture {
   readonly write: (event: unknown) => void;
   readonly records: () => ReadonlyArray<DevinSanitizedAcpCapture>;
+}
+
+export function selectDevinOptionalContent(
+  records: ReadonlyArray<DevinSanitizedAcpCapture>,
+): ReadonlyArray<DevinSanitizedAcpCapture> {
+  return records.filter(
+    (record) =>
+      record.classification !== "ordinary text" &&
+      !NON_OPTIONAL_UPDATE_TYPES.has(record.updateType ?? ""),
+  );
 }
 
 export function createDevinAcpCapture(enabled: boolean): DevinAcpCapture | undefined {
@@ -165,5 +182,34 @@ describe("Devin sanitized optional ACP fixtures", () => {
 
   it("does not create capture state when capture is disabled", () => {
     expect(createDevinAcpCapture(false)).toBeUndefined();
+  });
+
+  it("keeps startup metadata out of optional fixture output", () => {
+    expect(
+      selectDevinOptionalContent([
+        {
+          method: "session/update",
+          updateType: "agent_message_chunk",
+          contentType: "text",
+          classification: "ordinary text",
+        },
+        {
+          method: "session/update",
+          updateType: "available_commands_update",
+          classification: "unsupported",
+        },
+        {
+          method: "session/update",
+          updateType: "future_optional_update",
+          classification: "unsupported",
+        },
+      ]),
+    ).toEqual([
+      {
+        method: "session/update",
+        updateType: "future_optional_update",
+        classification: "unsupported",
+      },
+    ]);
   });
 });
