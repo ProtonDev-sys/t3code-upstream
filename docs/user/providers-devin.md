@@ -51,9 +51,10 @@ or review a Usage window before rotating logs if you need a longer local record.
 ## Capability limits
 
 Devin sessions use T3's shared ACP integration paths. The current Devin CLI does not provide
-a supported child-agent event stream or elicitation flow, and resource blocks are not currently
-available to T3 from Devin. These capabilities are therefore not available as Devin-specific controls
-in T3 Code.
+a supported child-agent event stream or elicitation flow, and T3 preserves supported resource
+metadata through the generic activity path; live Devin resource emission/rendering has not been
+verified because the installed CLI emitted no resource blocks. These capabilities are therefore not
+available as Devin-specific controls in T3 Code.
 
 ## Remote servers
 
