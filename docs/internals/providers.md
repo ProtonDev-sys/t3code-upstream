@@ -110,14 +110,22 @@ Usage service. Usage scans canonical `events.<thread>.log` files only; native AC
 are retained for diagnostics but are not treated as billing records. When explicitly configured,
 the Usage service also reads Devin's organization consumption endpoint with a server-only service
 key and organization ID. That ACU result is an optional `UsageSummary.accountUsage` field and
-remains separate from token/cost buckets. Standard ACP does not define a child-agent event stream,
-so the Agents panel displays only provider-supplied structured activity and labels child-agent
-telemetry as unavailable when the transport does not advertise it.
+remains separate from token/cost buckets.
 
-To run the Devin MCP smoke test, use `vp run test:devin-smoke`. It starts an isolated loopback T3
-MCP server, uses the real authenticated Devin CLI, verifies `tools/list` and `preview_status`, and
-consumes one Devin turn. The smoke test is opt-in and skips during normal tests. If `devin` is not
-on `PATH`, set `T3_DEVIN_BINARY_PATH` to the CLI binary.
+The Devin capability boundary is:
+
+| Capability         | Status                                                   | Boundary                                                                                                                                                                                                                                                                |
+| ------------------ | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MCP baseline       | Verified                                                 | `DevinAdapter` sends the existing T3 MCP HTTP server declaration with provider-scoped bearer auth. Direct local MCP `initialize` and `tools/list` work. The opt-in real Devin turn is not passing: it makes zero T3 MCP broker requests and does not return the marker. |
+| Resources          | Transport and projection ready; live emission unverified | A pure typed ACP normalizer, adapter-boundary sanitization, canonical event retention, and generic web/mobile projection coverage are present. The installed Devin CLI emitted no resource blocks, so live Devin resource emission and rendering are unverified.        |
+| Elicitation        | Unsupported                                              | Public ACP form requests do not provide a per-elicitation correlation ID, and the installed Devin CLI emitted none; no handler is wired.                                                                                                                                |
+| Child-agent events | Unsupported                                              | No documented or typed stable child-agent stream, identity, lifecycle, or parent linkage was observed. Ordinary tools remain generic. Standard ACP does not guarantee a child-agent event stream, so the Agents panel cannot promise Devin child-agent telemetry.       |
+
+These capabilities reuse the provider-neutral web, desktop, mobile, and remote paths. No Devin-specific
+UI or contract was added.
+
+The focused Devin MCP probe is run with `vp run test:devin-smoke`. It is opt-in and skips during
+normal tests. If `devin` is not on `PATH`, set `T3_DEVIN_BINARY_PATH` to the CLI binary.
 
 ## Attachments and stored history
 
