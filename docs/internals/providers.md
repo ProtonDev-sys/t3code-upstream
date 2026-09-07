@@ -93,6 +93,32 @@ checkpoints but cannot roll back its conversation. The [checkpoint boundary](./o
 therefore rejects revert before touching files. Native permission and question option IDs must
 also survive normalization; a display label is not necessarily a valid reply.
 
+## Devin ACP
+
+Devin runs its CLI as an ACP subprocess (see
+[DevinDriver](../../apps/server/src/provider/Drivers/DevinDriver.ts)). Model discovery follows the
+same startup and settings-change refresh path as the other managed providers. Its CLI family
+variants are normalized into parent model rows with reasoning, speed, and context-window option
+descriptors before the snapshot is published. Devin snapshots carry a provider-owned model catalog
+version; when that version changes, the registry replaces (rather than merges) the previous
+snapshot and rewrites the per-instance status cache.
+
+Devin ACP telemetry is normalized in `DevinAdapter` from both `usage_update` notifications (context
+window and cumulative session cost) and prompt response usage (per-turn token deltas). The adapter
+emits the shared `thread.token-usage.updated` event, which feeds the composer context meter and the
+Usage service. Usage scans canonical `events.<thread>.log` files only; native ACP protocol lines
+are retained for diagnostics but are not treated as billing records. When explicitly configured,
+the Usage service also reads Devin's organization consumption endpoint with a server-only service
+key and organization ID. That ACU result is an optional `UsageSummary.accountUsage` field and
+remains separate from token/cost buckets. Standard ACP does not define a child-agent event stream,
+so the Agents panel displays only provider-supplied structured activity and labels child-agent
+telemetry as unavailable when the transport does not advertise it.
+
+To run the Devin MCP smoke test, use `vp run test:devin-smoke`. It starts an isolated loopback T3
+MCP server, uses the real authenticated Devin CLI, verifies `tools/list` and `preview_status`, and
+consumes one Devin turn. The smoke test is opt-in and skips during normal tests. If `devin` is not
+on `PATH`, set `T3_DEVIN_BINARY_PATH` to the CLI binary.
+
 ## Attachments and stored history
 
 Attachments live outside the project workspace. [ProviderService](../../apps/server/src/provider/Layers/ProviderService.ts)
