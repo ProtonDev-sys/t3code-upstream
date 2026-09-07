@@ -68,7 +68,11 @@ describe("pending approvals", () => {
       { decision: "cancel", label: "Cancel" },
     ];
     const requested = makeActivity({
+      id: EventId.make("devin-permission"),
       kind: "approval.requested",
+      summary: "Command approval requested",
+      createdAt: "2026-09-08T00:00:00.000Z",
+      tone: "approval",
       payload: {
         requestId: "devin-permission",
         requestType: "command_execution_approval",
