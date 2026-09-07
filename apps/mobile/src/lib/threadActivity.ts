@@ -33,6 +33,8 @@ import {
 import {
   extractToolActivityData,
   extractToolActivityPresentation,
+  hasToolActivityData,
+  toolActivityDataBody,
 } from "@t3tools/client-runtime/work-log/tool-presentation";
 import { commandProgramName } from "@t3tools/client-runtime/work-log/command-label";
 
@@ -951,9 +953,7 @@ function buildWorkEntryExpandedBody(entry: WorkLogEntry): string | null {
     }
   };
 
-  if (entry.itemType === "mcp_tool_call" && entry.toolData !== undefined) {
-    appendBlock(`MCP call\n${JSON.stringify(entry.toolData, null, 2)}`);
-  }
+  appendBlock(toolActivityDataBody(entry));
   appendBlock(entry.rawCommand ?? entry.command);
   appendBlock(entry.detail);
   if ((entry.changedFiles?.length ?? 0) > 0) {
@@ -970,7 +970,7 @@ function buildWorkEntryExpandedBody(entry: WorkLogEntry): string | null {
  */
 function workEntryCanExpand(entry: WorkLogEntry): boolean {
   if (entry.agentSpawn) return agentSpawnMembers(entry.agentSpawn).length > 0;
-  if (entry.itemType === "mcp_tool_call" && entry.toolData !== undefined) return true;
+  if (hasToolActivityData(entry)) return true;
   if (entry.changedFiles?.some((path) => path.trim().length > 0)) return true;
   return Boolean((entry.rawCommand ?? entry.command)?.trim() || entry.detail?.trim());
 }

@@ -1500,7 +1500,7 @@ describe("buildThreadFeed", () => {
     ]);
   });
 
-  it("retains canonical ACP resource metadata for generic tool activities", () => {
+  it("shows canonical ACP resource URI and text in expanded generic tool activities", () => {
     const data = {
       toolCallId: "devin-resource-tool",
       kind: "other",
@@ -1509,6 +1509,7 @@ describe("buildThreadFeed", () => {
         name: "schema fixture",
         description: "typed protocol fixture",
         mimeType: "text/markdown",
+        text: "Embedded resource notes",
       },
       content: [
         {
@@ -1543,6 +1544,11 @@ describe("buildThreadFeed", () => {
       type: "activity-group",
       activities: [{ workEntry: { toolData: data } }],
     });
+    expect(group?.type).toBe("activity-group");
+    if (group?.type !== "activity-group") return;
+    expect(group.activities[0]?.canExpand).toBe(true);
+    expect(group.activities[0]?.getFullDetail()).toContain("urn:acp:fixture:resource-link");
+    expect(group.activities[0]?.getFullDetail()).toContain("Embedded resource notes");
   });
 
   it.each([

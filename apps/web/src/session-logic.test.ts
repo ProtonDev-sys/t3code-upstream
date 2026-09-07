@@ -8,6 +8,10 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import { resolveWorkEntryToolPresentation } from "@t3tools/client-runtime/work-log/presentation";
+import {
+  hasToolActivityData,
+  toolActivityDataBody,
+} from "@t3tools/client-runtime/work-log/tool-presentation";
 
 import {
   createMessageAttachmentPreviewProjector,
@@ -825,7 +829,7 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.toolLifecycleStatus).toBe("completed");
   });
 
-  it("retains canonical ACP resource metadata for generic tool activities", () => {
+  it("presents canonical ACP resource URI and text for generic tool activities", () => {
     const data = {
       toolCallId: "devin-resource-tool",
       kind: "other",
@@ -834,6 +838,7 @@ describe("deriveWorkLogEntries", () => {
         name: "schema fixture",
         description: "typed protocol fixture",
         mimeType: "text/markdown",
+        text: "Embedded resource notes",
       },
       content: [
         {
@@ -857,6 +862,11 @@ describe("deriveWorkLogEntries", () => {
     ]);
 
     expect(entry?.toolData).toBe(data);
+    expect(entry).toBeDefined();
+    if (!entry) return;
+    expect(hasToolActivityData(entry)).toBe(true);
+    expect(toolActivityDataBody(entry)).toContain("urn:acp:fixture:resource-link");
+    expect(toolActivityDataBody(entry)).toContain("Embedded resource notes");
   });
 
   it("preserves MCP server, tool, arguments, and results for expanded display", () => {

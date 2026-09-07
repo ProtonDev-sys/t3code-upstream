@@ -25,6 +25,24 @@ export function extractToolActivityData(payloadValue: unknown): unknown {
   return "resource" in data ? data : undefined;
 }
 
+type ToolActivityDataEntry = { readonly itemType?: string; readonly toolData?: unknown };
+
+/** Checks expandability without serializing payloads on collapsed rows. */
+export function hasToolActivityData(entry: ToolActivityDataEntry): boolean {
+  return entry.itemType === "mcp_tool_call"
+    ? entry.toolData !== undefined
+    : asRecord(asRecord(entry.toolData)?.resource) !== undefined;
+}
+
+/** Shared expanded detail for MCP calls and bounded generic resource metadata. */
+export function toolActivityDataBody(entry: ToolActivityDataEntry): string | undefined {
+  if (!hasToolActivityData(entry)) return undefined;
+  if (entry.itemType === "mcp_tool_call") {
+    return `MCP call\n${JSON.stringify(entry.toolData, null, 2)}`;
+  }
+  return `Resource\n${JSON.stringify(asRecord(entry.toolData)?.resource, null, 2)}`;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
