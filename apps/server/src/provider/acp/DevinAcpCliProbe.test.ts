@@ -226,8 +226,17 @@ describe.runIf(process.env.T3_DEVIN_MCP_SMOKE === "1")("Devin MCP smoke", () => 
           const registry = Context.get(mcpContext, McpSessionRegistry.McpSessionRegistry);
           const broker = Context.get(mcpContext, PreviewAutomationBroker.PreviewAutomationBroker);
           const issued = yield* registry.issue({ threadId, providerInstanceId });
+          const issuedToken = issued.config.authorizationHeader.slice("Bearer ".length);
           yield* Effect.addFinalizer(() =>
-            registry.revokeProviderSession(issued.config.providerSessionId),
+            registry.revokeProviderSession(issued.config.providerSessionId).pipe(
+              Effect.andThen(registry.resolve(issuedToken)),
+              Effect.tap((scope) =>
+                Effect.sync(() => {
+                  expect(scope).toBeUndefined();
+                }),
+              ),
+              Effect.asVoid,
+            ),
           );
           McpProviderSession.setMcpProviderSession(issued.config);
           yield* Effect.addFinalizer(() =>
