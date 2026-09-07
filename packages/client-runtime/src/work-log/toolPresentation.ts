@@ -19,9 +19,10 @@ export function extractToolActivityData(payloadValue: unknown): unknown {
   const payload = asRecord(payloadValue);
   const data = asRecord(payload?.data);
   if (!data) return undefined;
-  if ("resource" in data) return data;
-  if (payload?.itemType !== "mcp_tool_call") return undefined;
-  return typeof data.toolName === "string" ? (data.item ?? data) : data.item;
+  if (payload?.itemType === "mcp_tool_call") {
+    return typeof data.toolName === "string" ? (data.item ?? data) : data.item;
+  }
+  return "resource" in data ? data : undefined;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

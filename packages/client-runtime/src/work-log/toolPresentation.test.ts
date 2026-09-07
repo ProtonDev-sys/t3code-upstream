@@ -34,6 +34,22 @@ describe("extractToolActivityPresentation", () => {
     );
   });
 
+  it("keeps MCP item extraction precedence when MCP data also has a resource", () => {
+    const item = {
+      type: "mcpToolCall",
+      server: "t3-code",
+      tool: "preview_status",
+      result: { content: [{ type: "text", text: "attached" }] },
+    };
+    const data = {
+      toolName: "mcp__t3_code__preview_status",
+      item,
+      resource: devinResourceToolEvent.payload.data.resource,
+    };
+
+    expect(extractToolActivityData({ itemType: "mcp_tool_call", data })).toBe(item);
+  });
+
   it("reads provider-neutral presentation fields", () => {
     expect(
       extractToolActivityPresentation({
