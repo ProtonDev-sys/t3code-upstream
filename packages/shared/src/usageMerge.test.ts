@@ -5,11 +5,13 @@ import {
   type UsageAccountConsumption,
   type UsageDay,
   type UsageProviderKind,
-  type UsageSummary,
+  UsageSummary,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
+import * as Schema from "effect/Schema";
 
 import { mergeUsage, type EnvironmentUsage } from "./usageMerge.ts";
+const decodeUsageSummary = Schema.decodeUnknownSync(UsageSummary);
 
 function bucket(overrides: Partial<UsageBucket> = {}): UsageBucket {
   return {
@@ -206,11 +208,7 @@ describe("mergeUsage", () => {
         ),
         environment(
           "env-b",
-          summary(
-            [bucket()],
-            [{ provider: "claude", hostId: "linux", homePath: "/b" }],
-            USAGE_CONTRACT_VERSION - 2,
-          ),
+          summary([bucket()], [{ provider: "claude", hostId: "linux", homePath: "/b" }], 3),
         ),
       ],
       USAGE_CONTRACT_VERSION,
@@ -220,7 +218,7 @@ describe("mergeUsage", () => {
     expect(merged.staleEnvironments).toEqual(["env-b"]);
   });
 
-  it("keeps the previous compatible contract version so additive provider expansions still merge", () => {
+  it.each([4, 5])("keeps version %i after additive provider expansions", (contractVersion) => {
     const merged = mergeUsage(
       [
         environment(
@@ -232,10 +230,12 @@ describe("mergeUsage", () => {
         ),
         environment(
           "env-b",
-          summary(
-            [bucket({ costUsd: 4, provider: "codex", model: "gpt-5.6-sol" })],
-            [{ provider: "codex", hostId: "linux", homePath: "/b" }],
-            USAGE_CONTRACT_VERSION - 1,
+          decodeUsageSummary(
+            summary(
+              [bucket({ costUsd: 4, provider: "codex", model: "gpt-5.6-sol" })],
+              [{ provider: "codex", hostId: "linux", homePath: "/b" }],
+              contractVersion,
+            ),
           ),
         ),
       ],

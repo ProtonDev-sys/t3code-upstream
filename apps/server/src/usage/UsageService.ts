@@ -199,7 +199,9 @@ const ScanCacheJson = Schema.fromJsonString(Schema.Unknown as unknown as Schema.
 const decodeScanCacheFile = Schema.decodeUnknownEffect(ScanCacheJson);
 const encodeScanCacheFile = Schema.encodeEffect(ScanCacheJson);
 const decodeProviderSnapshotJson = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.Unknown),
+  Schema.fromJsonString(
+    Schema.Struct({ driver: Schema.Literal("devin"), models: Schema.Array(Schema.Unknown) }),
+  ),
 );
 
 export class UsageService extends Context.Service<
@@ -252,7 +254,6 @@ export const make = Effect.gen(function* () {
   const ratesCachePath = path.join(config.stateDir, "usage-model-rates.json");
   const scanCachePath = path.join(config.stateDir, "usage-scan-cache.json");
   let liteLlmRates: RateTable = new Map();
-  let rates: RateTable = new Map();
   let devinRates: RateTable = new Map();
   let ratesFetchedAtMs: number | null = null;
   let ratesStatus: UsagePricing["status"] = "unavailable";
@@ -260,17 +261,13 @@ export const make = Effect.gen(function* () {
   // the first fetch and then sees a table young enough to skip its own.
   const ratesLock = yield* Semaphore.make(1);
 
-  const rebuildRates = () => {
-    rates = new Map([...liteLlmRates, ...devinRates]);
-  };
-
   const pricing = (): UsagePricing => ({
     status: ratesStatus,
     source:
       devinRates.size > 0 ? `${LITELLM_RATES_URL} + ${DEVIN_RATES_SOURCE}` : LITELLM_RATES_URL,
     fetchedAt:
       ratesFetchedAtMs === null ? null : DateTime.formatIso(DateTime.makeUnsafe(ratesFetchedAtMs)),
-    knownModels: rates.size,
+    knownModels: liteLlmRates.size + devinRates.size,
   });
   const devinAccountCache = new Map<
     string,
@@ -297,7 +294,6 @@ export const make = Effect.gen(function* () {
         const parsed = parseRateTable(fromDisk.document);
         if (parsed.size > 0) {
           liteLlmRates = parsed;
-          rebuildRates();
           ratesFetchedAtMs = fromDisk.fetchedAtMs;
           ratesStatus = "cached";
           if (now - fromDisk.fetchedAtMs < maxAgeMs) return;
@@ -322,7 +318,6 @@ export const make = Effect.gen(function* () {
     if (parsed.size === 0) return;
 
     liteLlmRates = parsed;
-    rebuildRates();
     ratesFetchedAtMs = now;
     ratesStatus = "fresh";
 
@@ -341,7 +336,7 @@ export const make = Effect.gen(function* () {
 
   /**
    * Provider probes persist their model catalog in the status-cache directory.
-   * Merge Devin's advertised per-million prices into the general rate table so
+   * Retain Devin's advertised per-million prices for Devin records so
    * canonical ACP records can be priced even when the public LiteLLM table
    * does not yet contain a newly launched Devin model.
    */
@@ -363,7 +358,6 @@ export const make = Effect.gen(function* () {
       }
     }
     devinRates = merged;
-    rebuildRates();
   });
 
   /**
@@ -759,7 +753,8 @@ export const make = Effect.gen(function* () {
       untilDay: input.untilDay,
       resolution: input.resolution ?? "day",
       ...hourlyWindow,
-      rates,
+      rates: liteLlmRates,
+      providerRates: { devin: new Map([...liteLlmRates, ...devinRates]) },
       priceOverrides: createOverrideRateTable(settings.usagePriceOverrides),
     });
 

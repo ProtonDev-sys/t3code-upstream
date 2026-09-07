@@ -260,6 +260,22 @@ export function UsageRouteScreen() {
             />
           ) : (
             <>
+              <View className="flex-row items-center gap-3">
+                <SegmentedControl
+                  options={WINDOW_OPTIONS}
+                  selected={windowDays}
+                  onSelect={selectWindow}
+                  size="compact"
+                  className="flex-1"
+                />
+                <SegmentedControl
+                  options={METRIC_OPTIONS}
+                  selected={metric}
+                  onSelect={setMetric}
+                  size="compact"
+                  className="w-36"
+                />
+              </View>
               <UsageCoverageNotice
                 environments={environments}
                 merged={merged}

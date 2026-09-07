@@ -101,6 +101,78 @@ function totalOutputTokens(summary: { buckets: readonly { totals: { outputTokens
 }
 
 describe("UsageService", () => {
+  it.live("scopes catalog rates to Devin when provider model names collide", () =>
+    Effect.gen(function* () {
+      const { transcript, settings, home } = yield* setup;
+      yield* Effect.promise(() => NodeFSP.writeFile(transcript, claudeLine(1, 5, "shared-model")));
+      yield* Effect.gen(function* () {
+        const config = yield* ServerConfig.ServerConfig;
+        for (const [driver, inputPerMillion] of [
+          ["devin", 2],
+          ["codex", 999],
+        ] as const) {
+          yield* Effect.promise(() =>
+            NodeFSP.writeFile(
+              NodePath.join(config.providerStatusCacheDir, `${driver}.json`),
+              encodeUnknownJson({
+                driver,
+                models: [
+                  {
+                    slug: "shared-model",
+                    pricing: { inputPerMillion, outputPerMillion: inputPerMillion * 4 },
+                  },
+                ],
+              }),
+            ),
+          );
+        }
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(
+            NodePath.join(config.providerLogsDir, "events.devin-collision.log"),
+            `[2026-08-01T10:00:00Z] CANON: ${encodeUnknownJson({
+              type: "thread.token-usage.updated",
+              eventId: "usage-collision",
+              createdAt: "2026-08-01T10:00:00Z",
+              provider: "devin",
+              threadId: "devin-collision",
+              payload: {
+                usage: {
+                  model: "shared-model",
+                  providerSessionId: "devin-session",
+                  lastInputTokens: 10,
+                  lastOutputTokens: 5,
+                },
+              },
+            })}\n`,
+          ),
+        );
+        const service = yield* UsageService.make;
+        const summary = yield* service.readSummary(WINDOW);
+        const claude = summary.buckets.find((bucket) => bucket.provider === "claude");
+        const devin = summary.buckets.find((bucket) => bucket.provider === "devin");
+        assert.closeTo(claude?.costUsd ?? -1, 0.00035, 1e-12);
+        assert.closeTo(devin?.costUsd ?? -1, 0.00006, 1e-12);
+        yield* Effect.promise(() =>
+          NodeFSP.rm(NodePath.join(config.providerStatusCacheDir, "devin.json")),
+        );
+        const withoutDevin = yield* service.readSummary(WINDOW);
+        assert.isFalse(withoutDevin.pricing.source.includes("Devin CLI model catalog"));
+        for (const bucket of withoutDevin.buckets) assert.closeTo(bucket.costUsd, 0.00035, 1e-12);
+      }).pipe(
+        Effect.provide(
+          serviceLayers({
+            prefix: "usage-service-provider-collision",
+            home,
+            settings,
+            ratesDocument: {
+              "shared-model": { input_cost_per_token: 1e-5, output_cost_per_token: 5e-5 },
+            },
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.live("reprices unchanged transcripts when custom prices are added, edited, or removed", () =>
     Effect.gen(function* () {
       const { transcript, settings, home } = yield* setup;
@@ -307,6 +379,7 @@ describe("UsageService", () => {
           NodeFSP.writeFile(
             devinCachePath,
             encodeUnknownJson({
+              driver: "devin",
               models: [
                 {
                   slug: "devin-exclusive-model",
