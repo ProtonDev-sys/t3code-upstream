@@ -45,9 +45,15 @@ const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 const mockAgentPath = NodePath.join(__dirname, "../../../scripts/acp-mock-agent.ts");
 const mockAgentCommand = process.execPath;
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
+const encodeUnknownJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 const makeMockDevinWrapper = Effect.fn("makeMockDevinWrapper")(function* (
   extraEnv?: Record<string, string>,
+  skills?: {
+    readonly jsonPath: string;
+    readonly callLogPath: string;
+    readonly exitCode?: number;
+  },
 ) {
   const isWindows = yield* isHostWindows;
   const dir = yield* Effect.promise(() =>
@@ -59,7 +65,10 @@ const makeMockDevinWrapper = Effect.fn("makeMockDevinWrapper")(function* (
     const envLines = Object.entries(extraEnv ?? {})
       .map(([key, value]) => `set ${key}=${value}`)
       .join("\r\n");
-    const script = `@echo off\r\n${envLines}\r\n"${mockAgentCommand}" "${mockAgentPath}" %*\r\n`;
+    const skillsBranch = skills
+      ? `if "%~1"=="skills" (\r\n  echo called>>"${skills.callLogPath}"\r\n  type "${skills.jsonPath}"\r\n  exit /b ${skills.exitCode ?? 0}\r\n)\r\n`
+      : "";
+    const script = `@echo off\r\n${envLines}\r\n${skillsBranch}"${mockAgentCommand}" "${mockAgentPath}" %*\r\n`;
     yield* Effect.promise(() => NodeFSP.writeFile(wrapperPath, script, "utf8"));
     return wrapperPath;
   }
@@ -67,8 +76,12 @@ const makeMockDevinWrapper = Effect.fn("makeMockDevinWrapper")(function* (
   const envExports = Object.entries(extraEnv ?? {})
     .map(([key, value]) => `export ${key}=${shellQuote(value)}`)
     .join("\n");
+  const skillsBranch = skills
+    ? `if [ "$1" = "skills" ]; then\n  echo called >> '${skills.callLogPath}'\n  cat '${skills.jsonPath}'\n  exit ${skills.exitCode ?? 0}\nfi\n`
+    : "";
   const script = `#!/bin/sh
 ${envExports}
+${skillsBranch}
 exec ${shellQuote(mockAgentCommand)} ${shellQuote(mockAgentPath)} "$@"
 `;
   yield* Effect.promise(() => NodeFSP.writeFile(wrapperPath, script, "utf8"));
@@ -934,6 +947,200 @@ it.layer(devinAdapterTestLayer, { excludeTestServices: true })("DevinAdapterLive
       );
 
       yield* Fiber.interrupt(runtimeEventsFiber);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  const readPromptRequests = (logContents: string) =>
+    logContents
+      .split("\n")
+      .filter((line) => line.trim().length > 0)
+      .map((line): { method?: string; params?: unknown } | undefined => {
+        try {
+          return JSON.parse(line) as { method?: string; params?: unknown };
+        } catch {
+          return undefined;
+        }
+      })
+      .filter(
+        (value): value is { method: string; params: unknown } =>
+          value !== undefined && typeof value.method === "string",
+      )
+      .filter((request) => request.method === "session/prompt");
+
+  it.effect("dispatches a known $skill mention as @skills:name to Devin", () =>
+    Effect.gen(function* () {
+      const requestLogDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "devin-skills-req-")),
+      );
+      const requestLogPath = NodePath.join(requestLogDir, "requests.log");
+      const skillsJsonPath = NodePath.join(requestLogDir, "skills.json");
+      const skillsCallLogPath = NodePath.join(requestLogDir, "skills-calls.log");
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(
+          skillsJsonPath,
+          encodeUnknownJson([
+            {
+              name: "deploy",
+              base_dir: NodePath.join(requestLogDir, "skills", "deploy"),
+              description: "Deploy the app.",
+              triggers: ["user", "model"],
+            },
+          ]),
+          "utf8",
+        ),
+      );
+      const wrapperPath = yield* makeMockDevinWrapper(
+        { T3_ACP_REQUEST_LOG_PATH: requestLogPath },
+        { jsonPath: skillsJsonPath, callLogPath: skillsCallLogPath },
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+      const threadId = ThreadId.make("devin-skill-dispatch");
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("devin"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: devinModelSelection("default"),
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "$deploy staging now",
+        attachments: [],
+      });
+
+      const logContents = yield* Effect.promise(() =>
+        NodeFSP.readFile(requestLogPath, "utf8").catch(() => ""),
+      );
+      const promptRequests = readPromptRequests(logContents);
+      assert.isAtLeast(promptRequests.length, 1);
+      const lastPrompt = promptRequests.at(-1)!;
+      const params = lastPrompt.params as {
+        prompt?: ReadonlyArray<{ type?: string; text?: string }>;
+      };
+      const textBlocks = (params.prompt ?? []).filter((block) => block.type === "text");
+      assert.lengthOf(textBlocks, 1);
+      assert.equal(textBlocks[0]!.text, "@skills:deploy staging now");
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("sends the original prompt unchanged when skill discovery fails", () =>
+    Effect.gen(function* () {
+      const requestLogDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "devin-skill-fail-")),
+      );
+      const requestLogPath = NodePath.join(requestLogDir, "requests.log");
+      const skillsJsonPath = NodePath.join(requestLogDir, "skills.json");
+      const skillsCallLogPath = NodePath.join(requestLogDir, "skills-calls.log");
+      yield* Effect.promise(() => NodeFSP.writeFile(skillsJsonPath, "[]", "utf8"));
+      const wrapperPath = yield* makeMockDevinWrapper(
+        { T3_ACP_REQUEST_LOG_PATH: requestLogPath },
+        { jsonPath: skillsJsonPath, callLogPath: skillsCallLogPath, exitCode: 3 },
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+      const threadId = ThreadId.make("devin-skill-fail");
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("devin"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: devinModelSelection("default"),
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "$deploy staging now",
+        attachments: [],
+      });
+
+      const logContents = yield* Effect.promise(() =>
+        NodeFSP.readFile(requestLogPath, "utf8").catch(() => ""),
+      );
+      const promptRequests = readPromptRequests(logContents);
+      assert.isAtLeast(promptRequests.length, 1);
+      const lastPrompt = promptRequests.at(-1)!;
+      const params = lastPrompt.params as {
+        prompt?: ReadonlyArray<{ type?: string; text?: string }>;
+      };
+      const textBlocks = (params.prompt ?? []).filter((block) => block.type === "text");
+      // Discovery failed, so the original prompt goes out unchanged.
+      assert.lengthOf(textBlocks, 1);
+      assert.equal(textBlocks[0]!.text, "$deploy staging now");
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("caches a successful discovery per workspace across turns", () =>
+    Effect.gen(function* () {
+      const requestLogDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "devin-skill-cache-")),
+      );
+      const requestLogPath = NodePath.join(requestLogDir, "requests.log");
+      const skillsJsonPath = NodePath.join(requestLogDir, "skills.json");
+      const skillsCallLogPath = NodePath.join(requestLogDir, "skills-calls.log");
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(
+          skillsJsonPath,
+          encodeUnknownJson([{ name: "deploy", base_dir: NodePath.join(requestLogDir, "deploy") }]),
+          "utf8",
+        ),
+      );
+      const wrapperPath = yield* makeMockDevinWrapper(
+        { T3_ACP_REQUEST_LOG_PATH: requestLogPath },
+        { jsonPath: skillsJsonPath, callLogPath: skillsCallLogPath },
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+      const threadId = ThreadId.make("devin-skill-cache");
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("devin"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: devinModelSelection("default"),
+      });
+      yield* adapter.sendTurn({ threadId, input: "$deploy staging", attachments: [] });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "follow up with $deploy again",
+        attachments: [],
+      });
+
+      const calls = yield* Effect.promise(() =>
+        NodeFSP.readFile(skillsCallLogPath, "utf8").catch(() => ""),
+      );
+      // Two turns, one discovery: the successful catalog is cached per cwd.
+      assert.lengthOf(
+        calls.split("called").filter((part) => part.length === 0),
+        1,
+      );
+
+      const logContents = yield* Effect.promise(() =>
+        NodeFSP.readFile(requestLogPath, "utf8").catch(() => ""),
+      );
+      const promptRequests = readPromptRequests(logContents);
+      assert.lengthOf(promptRequests, 2);
+      const firstText = (
+        (
+          promptRequests[0]!.params as {
+            prompt?: ReadonlyArray<{ type?: string; text?: string }>;
+          }
+        ).prompt ?? []
+      ).find((block) => block.type === "text")?.text;
+      const secondText = (
+        (
+          promptRequests.at(-1)!.params as {
+            prompt?: ReadonlyArray<{ type?: string; text?: string }>;
+          }
+        ).prompt ?? []
+      ).find((block) => block.type === "text")?.text;
+      assert.equal(firstText, "@skills:deploy staging");
+      assert.equal(secondText, "follow up with @skills:deploy again");
+
       yield* adapter.stopSession(threadId);
     }),
   );

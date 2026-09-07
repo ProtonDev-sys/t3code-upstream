@@ -77,6 +77,8 @@ import {
   resolveDevinAcpBaseModelId,
 } from "../acp/DevinAcpSupport.ts";
 import { type DevinAdapterShape } from "../Services/DevinAdapter.ts";
+import { hasCandidateSkillMention, planDevinSkillDispatch } from "../Drivers/DevinSkillDispatch.ts";
+import { discoverDevinSkills } from "../Drivers/DevinSkills.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 
@@ -443,6 +445,12 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
     const sessions = new Map<ThreadId, DevinSessionContext>();
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
+    /**
+     * Successful lazy skill discoveries, keyed by the session workspace cwd.
+     * Failures are never cached: a failed probe retries on the next turn that
+     * carries a candidate `$skill` token.
+     */
+    const skillNamesByCwd = new Map<string, ReadonlySet<string>>();
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
     const randomUUIDv4 = crypto.randomUUIDv4.pipe(
@@ -474,6 +482,53 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
 
     const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
       PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid);
+
+    /**
+     * Best-effort lazy skill discovery for the session workspace. Successful
+     * catalogs are cached per cwd for the adapter's lifetime; any failure is
+     * logged at debug level without environment or prompt contents and left
+     * uncached so a later turn can retry.
+     */
+    const resolveSkillNamesForCwd = (cwd: string, settings: DevinSettings) => {
+      const cached = skillNamesByCwd.get(cwd);
+      if (cached) {
+        return Effect.succeed(cached);
+      }
+      return discoverDevinSkills(settings, options?.environment ?? process.env, cwd).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+        Effect.provideService(Path.Path, path),
+        Effect.map((skills) => {
+          const names = new Set(
+            skills
+              .filter((skill) => skill.enabled && skill.userInvocable !== false)
+              .map((skill) => skill.name),
+          );
+          skillNamesByCwd.set(cwd, names);
+          return names;
+        }),
+        Effect.tapError((cause) =>
+          Effect.logDebug("devin skill discovery failed; sending prompt unchanged", {
+            stage: cause.stage,
+          }),
+        ),
+        Effect.catch(() => Effect.succeed(new Set<string>() as ReadonlySet<string>)),
+      );
+    };
+
+    /**
+     * Translate known `$skill` mentions into Devin's native `@skills:name`
+     * syntax. Discovery runs lazily — only when the prompt carries a candidate
+     * token — and a failure leaves the prompt unchanged so the turn still goes
+     * out.
+     */
+    const dispatchDevinSkills = (prompt: string, cwd: string, settings: DevinSettings) =>
+      hasCandidateSkillMention(prompt)
+        ? resolveSkillNamesForCwd(cwd, settings).pipe(
+            Effect.map(
+              (skillNames) => planDevinSkillDispatch(prompt, skillNames)?.prompt ?? prompt,
+            ),
+          )
+        : Effect.succeed(prompt);
 
     const getThreadSemaphore = (threadId: string) =>
       SynchronizedRef.modifyEffect(threadLocksRef, (current) => {
@@ -1184,9 +1239,21 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
           Effect.gen(function* () {
             const ctx = yield* requireSession(input.threadId);
 
+            const effectiveDevinSettings = options?.resolveSettings
+              ? yield* options.resolveSettings
+              : devinSettings;
+            // Known `$skill` mentions become Devin's native `@skills:name`
+            // before the prompt is built. Discovery is lazy (a candidate token
+            // is required) and best-effort: a failure leaves the prompt as-is.
+            const trimmedInput = input.input?.trim();
+            const dispatchedInput =
+              trimmedInput && ctx.session.cwd
+                ? yield* dispatchDevinSkills(trimmedInput, ctx.session.cwd, effectiveDevinSettings)
+                : trimmedInput;
+
             const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
-            if (input.input?.trim()) {
-              promptParts.push({ type: "text", text: input.input.trim() });
+            if (dispatchedInput) {
+              promptParts.push({ type: "text", text: dispatchedInput });
             }
             if (input.attachments && input.attachments.length > 0) {
               for (const attachment of input.attachments) {
