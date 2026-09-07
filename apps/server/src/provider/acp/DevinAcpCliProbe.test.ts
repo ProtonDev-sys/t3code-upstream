@@ -54,6 +54,10 @@ import { makeDevinAdapter } from "../Layers/DevinAdapter.ts";
 import { checkDevinProviderStatus } from "../Layers/DevinProvider.ts";
 import { spawnAndCollect } from "../providerSnapshot.ts";
 import { makeDevinAcpRuntime } from "./DevinAcpSupport.ts";
+import {
+  DEVIN_OPTIONAL_CONTENT_UNSUPPORTED_FIXTURE,
+  makeDevinAcpCapture,
+} from "./DevinOptionalContentFixtures.test.ts";
 
 const configuredBinary = process.env.T3_DEVIN_BINARY_PATH?.trim() || "devin";
 const decodeDevinSettings = Schema.decodeSync(DevinSettings);
@@ -77,16 +81,44 @@ const runDevinCommand = (args: ReadonlyArray<string>) =>
     );
   });
 
-const makeProbeRuntime = Effect.gen(function* () {
-  const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  return yield* makeDevinAcpRuntime({
-    devinSettings: { binaryPath: configuredBinary },
-    environment: process.env,
-    childProcessSpawner,
-    cwd: process.cwd(),
-    clientInfo: { name: "t3-devin-probe", version: "0.0.0" },
+const makeProbeRuntime = (capture?: ReturnType<typeof makeDevinAcpCapture>) =>
+  Effect.gen(function* () {
+    const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    return yield* makeDevinAcpRuntime({
+      devinSettings: { binaryPath: configuredBinary },
+      environment: process.env,
+      childProcessSpawner,
+      cwd: process.cwd(),
+      clientInfo: { name: "t3-devin-probe", version: "0.0.0" },
+      ...(capture
+        ? {
+            protocolLogging: {
+              logIncoming: true,
+              logger: (event: unknown) => Effect.sync(() => capture.write(event)),
+            },
+          }
+        : {}),
+    });
   });
-});
+
+const captureEnabled = process.env.T3_DEVIN_ACP_CAPTURE === "1";
+
+const emitCapture = (capture: ReturnType<typeof makeDevinAcpCapture>, force = false) =>
+  Effect.sync(() => {
+    if (!captureEnabled && !force) return;
+    const records = capture
+      .records()
+      .filter((record) =>
+        ["resource link", "embedded resource", "elicitation", "child-agent update"].includes(
+          record.classification,
+        ),
+      );
+    process.stderr.write(
+      `${JSON.stringify({
+        optionalContent: records.length > 0 ? records : DEVIN_OPTIONAL_CONTENT_UNSUPPORTED_FIXTURE,
+      })}\n`,
+    );
+  });
 
 describe.runIf(process.env.T3_DEVIN_ACP_PROBE === "1")("Devin ACP CLI probe", () => {
   it.effect("reports the real CLI auth state without invoking login", () =>
@@ -119,7 +151,7 @@ describe.runIf(process.env.T3_DEVIN_ACP_PROBE === "1")("Devin ACP CLI probe", ()
 
   it.effect("starts a real ACP session and accepts an advertised model selection", () =>
     Effect.gen(function* () {
-      const runtime = yield* makeProbeRuntime;
+      const runtime = yield* makeProbeRuntime();
       const started = yield* runtime.start();
       expect(typeof started.sessionId).toBe("string");
       expect(started.initializeResult).toBeDefined();
@@ -144,9 +176,10 @@ describe.runIf(process.env.T3_DEVIN_ACP_PROBE === "1")("Devin ACP CLI probe", ()
 
   it.effect.skipIf(process.env.T3_DEVIN_LIVE_TURN !== "1")(
     "finishes a real Devin turn and streams its answer",
-    () =>
-      Effect.gen(function* () {
-        const runtime = yield* makeProbeRuntime;
+    () => {
+      const capture = makeDevinAcpCapture();
+      return Effect.gen(function* () {
+        const runtime = yield* makeProbeRuntime(capture);
         yield* runtime.start();
         const chunks: string[] = [];
         const events = yield* Stream.runForEach(runtime.getEvents(), (event) => {
@@ -165,7 +198,13 @@ describe.runIf(process.env.T3_DEVIN_ACP_PROBE === "1")("Devin ACP CLI probe", ()
         expect(result.stopReason).toBe("end_turn");
         expect(chunks.join("")).toContain("T3_DEVIN_OK");
         yield* Fiber.interrupt(events);
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+        yield* emitCapture(capture);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(NodeServices.layer),
+        Effect.tapError(() => emitCapture(capture, true)),
+      );
+    },
   );
 });
 
