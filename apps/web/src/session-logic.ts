@@ -24,6 +24,7 @@ import {
   type OrchestrationThreadActivity,
   type OrchestrationProposedPlanId,
   type ToolLifecycleItemType,
+  ProviderDriverKind,
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
@@ -42,6 +43,49 @@ import {
 export type { PendingApproval, PendingUserInput } from "@t3tools/client-runtime/pending-requests";
 
 export { formatDuration } from "@t3tools/shared/orchestrationTiming";
+
+export type ProviderPickerKind = ProviderDriverKind;
+
+export const PROVIDER_OPTIONS: Array<{
+  value: ProviderPickerKind;
+  label: string;
+  available: boolean;
+  /** Shown on the model picker sidebar when relevant */
+  pickerSidebarBadge?: "new" | "soon";
+}> = [
+  { value: ProviderDriverKind.make("codex"), label: "Codex", available: true },
+  { value: ProviderDriverKind.make("claudeAgent"), label: "Claude", available: true },
+  {
+    value: ProviderDriverKind.make("opencode"),
+    label: "OpenCode",
+    available: true,
+    pickerSidebarBadge: "new",
+  },
+  {
+    value: ProviderDriverKind.make("cursor"),
+    label: "Cursor",
+    available: true,
+    pickerSidebarBadge: "new",
+  },
+  {
+    value: ProviderDriverKind.make("devin"),
+    label: "Devin",
+    available: true,
+    pickerSidebarBadge: "new",
+  },
+  {
+    value: ProviderDriverKind.make("grok"),
+    label: "Grok",
+    available: true,
+    pickerSidebarBadge: "new",
+  },
+  {
+    value: ProviderDriverKind.make("antigravity"),
+    label: "Antigravity",
+    available: true,
+    pickerSidebarBadge: "new",
+  },
+];
 
 export {
   workEntryDisplayIndicatesToolFailure,
