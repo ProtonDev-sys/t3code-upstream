@@ -499,6 +499,7 @@ export function foldSubagentActivities(
         }
         const detail = asString(payload.detail);
         if (detail && agent.title === agent.id) agent.title = detail;
+        agent.recentActivity = appendActivity(agent.recentActivity, at, "Started");
         agent.updatedAt = at;
         break;
       }
@@ -537,6 +538,10 @@ export function foldSubagentActivities(
         }
         const error = asString(payload.error);
         if (error) agent.error = bounded(error);
+        const status = asString(payload.status);
+        if (status) {
+          agent.recentActivity = appendActivity(agent.recentActivity, at, `Status: ${status}`);
+        }
         agent.usage = mergeUsageMax(agent.usage, asUsage(payload.typedUsage));
         agent.updatedAt = at;
         break;
@@ -568,6 +573,9 @@ export function foldSubagentActivities(
         if (endedAt && !wasTerminal && isTerminalSubagentStatus(agent.status)) {
           agent.completedAt = endedAt;
         }
+        if (status) {
+          agent.recentActivity = appendActivity(agent.recentActivity, at, `Status: ${status}`);
+        }
         agent.updatedAt = at;
         break;
       }
@@ -597,6 +605,11 @@ export function foldSubagentActivities(
               agent.result = agent.result ?? bounded(summary);
             }
           }
+          agent.recentActivity = appendActivity(
+            agent.recentActivity,
+            at,
+            summary ?? `Status: ${agent.status}`,
+          );
           agent.usage = mergeUsageMax(agent.usage, asUsage(payload.typedUsage));
           break;
         }
@@ -609,6 +622,11 @@ export function foldSubagentActivities(
             agent.result = bounded(summary);
           }
         }
+        agent.recentActivity = appendActivity(
+          agent.recentActivity,
+          at,
+          summary ?? `Status: ${status}`,
+        );
         agent.usage = mergeUsageMax(agent.usage, asUsage(payload.typedUsage));
         agent.updatedAt = at;
         break;
