@@ -116,6 +116,13 @@ const devinResourceLinkFixture = {
   },
 } satisfies EffectAcpSchema.ToolCallContent;
 
+function containsString(value: unknown, needle: string): boolean {
+  if (typeof value === "string") return value.includes(needle);
+  if (Array.isArray(value)) return value.some((entry) => containsString(entry, needle));
+  if (typeof value !== "object" || value === null) return false;
+  return Object.values(value).some((entry) => containsString(entry, needle));
+}
+
 it("does not let a stale prompt lease consume a newer turn's accounting", () => {
   const firstTurnId = TurnId.make("devin-first-turn");
   const nextTurnId = TurnId.make("devin-next-turn");
@@ -200,12 +207,19 @@ it.layer(devinAdapterTestLayer, { excludeTestServices: true })("DevinAdapterLive
     }),
   );
 
-  it.effect("retains normalized typed ACP resource data on the canonical tool event", () =>
+  it.effect("sanitizes resource content at the canonical and native log boundaries", () =>
     Effect.gen(function* () {
       const wrapperPath = yield* makeMockDevinWrapper({
         T3_ACP_EMIT_DEVIN_RESOURCE_TOOL_CALL: "1",
       });
-      const adapter = yield* makeTestAdapter(wrapperPath);
+      const nativeLogs: unknown[] = [];
+      const adapter = yield* makeTestAdapter(wrapperPath, {
+        nativeEventLogger: {
+          filePath: "devin-resource-test.log",
+          write: (event) => Effect.sync(() => nativeLogs.push(event)),
+          close: () => Effect.void,
+        },
+      });
       const threadId = ThreadId.make("devin-resource-tool-event");
       const completedTool =
         yield* Deferred.make<Extract<ProviderRuntimeEvent, { type: "item.completed" }>>();
@@ -241,6 +255,56 @@ it.layer(devinAdapterTestLayer, { excludeTestServices: true })("DevinAdapterLive
           description: devinResourceLinkFixture.content.description,
           mimeType: devinResourceLinkFixture.content.mimeType,
         });
+        assert.deepEqual(data?.content, [
+          {
+            type: "content",
+            content: {
+              type: "text",
+              text: "ordinary tool output",
+            },
+          },
+        ]);
+        assert.isFalse(containsString(data, "malformed-resource-link"));
+        assert.isFalse(containsString(data, "oversized-resource"));
+        assert.isFalse(containsString(data, "binary-resource"));
+        assert.isFalse(containsString(data, "opaque-binary-fixture"));
+
+        const nativeToolLogs = nativeLogs.filter((log) => {
+          const payload = (log as { event?: { payload?: unknown } } | undefined)?.event?.payload;
+          return (
+            typeof payload === "object" &&
+            payload !== null &&
+            "update" in payload &&
+            typeof payload.update === "object" &&
+            payload.update !== null &&
+            "sessionUpdate" in payload.update &&
+            payload.update.sessionUpdate === "tool_call"
+          );
+        });
+        assert.lengthOf(nativeToolLogs, 1);
+        const nativePayload = (nativeToolLogs[0] as { event?: { payload?: unknown } } | undefined)
+          ?.event?.payload;
+        assert.deepEqual(nativePayload, {
+          sessionId: "mock-session-1",
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "devin-resource-tool",
+            title: "Resource fixture",
+            kind: "other",
+            status: "completed",
+            resource: {
+              uri: devinResourceLinkFixture.content.uri,
+              name: devinResourceLinkFixture.content.name,
+              description: devinResourceLinkFixture.content.description,
+              mimeType: devinResourceLinkFixture.content.mimeType,
+            },
+          },
+        });
+        assert.deepEqual(event.raw?.payload, nativePayload);
+        assert.isFalse(containsString(nativeLogs, "malformed-resource-link"));
+        assert.isFalse(containsString(nativeLogs, "oversized-resource"));
+        assert.isFalse(containsString(nativeLogs, "binary-resource"));
+        assert.isFalse(containsString(nativeLogs, "opaque-binary-fixture"));
       }).pipe(
         Effect.ensuring(
           Effect.gen(function* () {

@@ -842,16 +842,54 @@ const program = Effect.gen(function* () {
       }
 
       if (emitDevinResourceToolCall) {
-        const content = {
-          type: "content",
-          content: {
-            type: "resource_link",
-            uri: "urn:acp:fixture:resource-link",
-            name: "schema fixture",
-            description: "typed protocol fixture",
-            mimeType: "text/markdown",
+        const content = [
+          {
+            type: "content",
+            content: {
+              type: "resource_link",
+              uri: "urn:acp:fixture:resource-link",
+              name: "schema fixture",
+              description: "typed protocol fixture",
+              mimeType: "text/markdown",
+            },
           },
-        } satisfies AcpSchema.ToolCallContent;
+          {
+            type: "content",
+            content: {
+              type: "resource_link",
+              uri: "",
+              name: "malformed-resource-link",
+            },
+          },
+          {
+            type: "content",
+            content: {
+              type: "resource",
+              resource: {
+                uri: "urn:acp:fixture:oversized-resource",
+                text: "x".repeat(8_001),
+              },
+            },
+          },
+          {
+            type: "content",
+            content: {
+              type: "resource",
+              resource: {
+                uri: "urn:acp:fixture:binary-resource",
+                mimeType: "application/octet-stream",
+                blob: "opaque-binary-fixture",
+              },
+            },
+          },
+          {
+            type: "content",
+            content: {
+              type: "text",
+              text: "ordinary tool output",
+            },
+          },
+        ] satisfies ReadonlyArray<AcpSchema.ToolCallContent>;
         yield* agent.client.sessionUpdate({
           sessionId: requestedSessionId,
           update: {
@@ -860,7 +898,7 @@ const program = Effect.gen(function* () {
             title: "Resource fixture",
             kind: "other",
             status: "completed",
-            content: [content],
+            content,
           },
         });
         return { stopReason: "end_turn" };

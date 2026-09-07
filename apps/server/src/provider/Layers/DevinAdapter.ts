@@ -70,7 +70,10 @@ import {
   parsePermissionRequest,
 } from "../acp/AcpRuntimeModel.ts";
 import { makeAcpNativeLoggerFactory } from "../acp/AcpNativeLogging.ts";
-import { normalizeDevinResourceContent } from "../acp/DevinResourceSupport.ts";
+import {
+  DEVIN_RESOURCE_TEXT_MAX_CHARS,
+  normalizeDevinResourceContent,
+} from "../acp/DevinResourceSupport.ts";
 import {
   applyDevinAcpModelSelection,
   inferDevinContextWindowTokens,
@@ -272,24 +275,89 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function withNormalizedDevinResource(toolCall: AcpToolCallState): AcpToolCallState {
+function isDevinResourceContent(value: unknown): boolean {
+  if (!isRecord(value) || value.type !== "content" || !isRecord(value.content)) {
+    return false;
+  }
+  return value.content.type === "resource_link" || value.content.type === "resource";
+}
+
+function sanitizeDevinToolCall(toolCall: AcpToolCallState): AcpToolCallState {
   const content = toolCall.data.content;
   if (!Array.isArray(content)) {
     return toolCall;
   }
+  let changed = false;
+  let resource = toolCall.data.resource;
+  const retainedContent: Array<unknown> = [];
   for (const entry of content) {
+    if (!isDevinResourceContent(entry)) {
+      retainedContent.push(entry);
+      continue;
+    }
+    changed = true;
+    if (resource !== undefined) continue;
     const normalized = normalizeDevinResourceContent(entry);
     if (normalized.kind === "resource") {
-      return {
-        ...toolCall,
-        data: {
-          ...toolCall.data,
-          resource: normalized.resource,
-        },
-      };
+      resource = normalized.resource;
     }
   }
-  return toolCall;
+  if (!changed) {
+    return toolCall;
+  }
+  const data: Record<string, unknown> = { ...toolCall.data };
+  if (retainedContent.length > 0) {
+    data.content = retainedContent;
+  } else {
+    delete data.content;
+  }
+  if (resource !== undefined) {
+    data.resource = resource;
+  } else {
+    delete data.resource;
+  }
+  return { ...toolCall, data };
+}
+
+const DEVIN_TOOL_CALL_RAW_METADATA_FIELDS = [
+  "sessionUpdate",
+  "toolCallId",
+  "title",
+  "kind",
+  "status",
+] as const;
+
+function boundedDevinMetadata(value: unknown): string | undefined {
+  return typeof value === "string" && value.length <= DEVIN_RESOURCE_TEXT_MAX_CHARS
+    ? value
+    : undefined;
+}
+
+function sanitizeDevinToolCallRawPayload(rawPayload: unknown, toolCall: AcpToolCallState): unknown {
+  if (!isRecord(rawPayload) || !isRecord(rawPayload.update)) {
+    return rawPayload;
+  }
+  const rawUpdate = rawPayload.update;
+  const hasRawResource =
+    Array.isArray(rawUpdate.content) && rawUpdate.content.some(isDevinResourceContent);
+  if (!hasRawResource && toolCall.data.resource === undefined) {
+    return rawPayload;
+  }
+  const update: Record<string, unknown> = {};
+  for (const field of DEVIN_TOOL_CALL_RAW_METADATA_FIELDS) {
+    const value = boundedDevinMetadata(rawUpdate[field]);
+    if (value !== undefined) {
+      update[field] = value;
+    }
+  }
+  if (toolCall.data.resource !== undefined) {
+    update.resource = toolCall.data.resource;
+  }
+  const sessionId = boundedDevinMetadata(rawPayload.sessionId);
+  return {
+    ...(sessionId !== undefined ? { sessionId } : {}),
+    update,
+  };
 }
 
 function parseDevinResume(raw: unknown): { sessionId: string } | undefined {
@@ -1000,17 +1068,21 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
                 );
                 return;
               case "ToolCallUpdated":
-                yield* logNative(ctx.threadId, "session/update", event.rawPayload, "acp.jsonrpc");
-                yield* offerRuntimeEvent(
-                  makeAcpToolCallEvent({
-                    stamp: yield* makeEventStamp(),
-                    provider: PROVIDER,
-                    threadId: ctx.threadId,
-                    turnId: ctx.activeTurnId,
-                    toolCall: withNormalizedDevinResource(event.toolCall),
-                    rawPayload: event.rawPayload,
-                  }),
-                );
+                {
+                  const toolCall = sanitizeDevinToolCall(event.toolCall);
+                  const rawPayload = sanitizeDevinToolCallRawPayload(event.rawPayload, toolCall);
+                  yield* logNative(ctx.threadId, "session/update", rawPayload, "acp.jsonrpc");
+                  yield* offerRuntimeEvent(
+                    makeAcpToolCallEvent({
+                      stamp: yield* makeEventStamp(),
+                      provider: PROVIDER,
+                      threadId: ctx.threadId,
+                      turnId: ctx.activeTurnId,
+                      toolCall,
+                      rawPayload,
+                    }),
+                  );
+                }
                 return;
               case "ContentDelta":
                 yield* logNative(ctx.threadId, "session/update", event.rawPayload, "acp.jsonrpc");
