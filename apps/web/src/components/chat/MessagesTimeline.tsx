@@ -16,6 +16,10 @@ import {
   workEntryViewedImagePath,
 } from "@t3tools/client-runtime/work-log/presentation";
 import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
+import {
+  hasToolActivityData,
+  toolActivityDataBody,
+} from "@t3tools/client-runtime/work-log/tool-presentation";
 import type { AgentPanelModel } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
   emptyAgentPanelModel,
@@ -3109,9 +3113,7 @@ function buildToolCallExpandedBody(
     seen.add(text);
     blocks.push(text);
   };
-  if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
-    addBlock(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
-  }
+  addBlock(toolActivityDataBody(workEntry));
   const command = workEntry.command?.trim();
   const raw = workEntryRawCommand(workEntry);
   if (command === visibleLabel.trim()) {
@@ -3338,7 +3340,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       : null;
   const canExpand =
     (showFailedIndicator && previewText.trim().length > 0) ||
-    (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) ||
+    hasToolActivityData(workEntry) ||
     Boolean(
       workEntryRawCommand(workEntry) ||
       workEntry.command?.trim() ||
