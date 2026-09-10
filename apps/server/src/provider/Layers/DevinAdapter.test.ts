@@ -565,75 +565,97 @@ it.layer(devinAdapterTestLayer, { excludeTestServices: true })("DevinAdapterLive
     }),
   );
 
-  it.effect("passes the current T3 MCP server to a new Devin ACP session", () =>
-    Effect.gen(function* () {
-      const requestLogDir = yield* Effect.promise(() =>
-        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "devin-acp-mcp-")),
-      );
-      const requestLogPath = NodePath.join(requestLogDir, "requests.log");
-      const wrapperPath = yield* makeMockDevinWrapper({
-        T3_ACP_REQUEST_LOG_PATH: requestLogPath,
-      });
-      const adapter = yield* makeTestAdapter(wrapperPath);
-      const threadId = ThreadId.make("devin-t3-mcp");
-      const endpoint = "http://127.0.0.1:43123/mcp";
-      const authorizationHeader = "Bearer devin-mcp-test-token";
-
-      yield* Effect.sync(() =>
-        McpProviderSession.setMcpProviderSession({
-          environmentId: EnvironmentId.make("devin-mcp-test-environment"),
-          threadId,
-          providerSessionId: "devin-mcp-test-session",
-          providerInstanceId: ProviderInstanceId.make("devin"),
-          endpoint,
-          authorizationHeader,
-        }),
-      );
-
-      yield* Effect.gen(function* () {
-        yield* adapter.startSession({
-          threadId,
-          provider: ProviderDriverKind.make("devin"),
-          cwd: process.cwd(),
-          runtimeMode: "full-access",
-          modelSelection: devinModelSelection("default"),
+  it.effect(
+    "connects T3 tools from a private workspace and removes it when the session stops",
+    () =>
+      Effect.gen(function* () {
+        const requestLogDir = yield* Effect.promise(() =>
+          NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "devin-acp-mcp-")),
+        );
+        const requestLogPath = NodePath.join(requestLogDir, "requests.log");
+        const wrapperPath = yield* makeMockDevinWrapper({
+          T3_ACP_REQUEST_LOG_PATH: requestLogPath,
         });
+        const adapter = yield* makeTestAdapter(wrapperPath);
+        const threadId = ThreadId.make("devin-t3-mcp");
+        const endpoint = "http://127.0.0.1:43123/mcp";
+        const authorizationHeader = "Bearer devin-mcp-test-token";
 
-        const logContents = yield* Effect.promise(() => NodeFSP.readFile(requestLogPath, "utf8"));
-        const requests = logContents
-          .split("\n")
-          .filter((line) => line.trim().length > 0)
-          .map((line): { method?: string; params?: unknown } | undefined => {
-            try {
-              return JSON.parse(line) as { method?: string; params?: unknown };
-            } catch {
-              return undefined;
-            }
-          })
-          .filter(
-            (value): value is { method: string; params: unknown } =>
-              value !== undefined && typeof value.method === "string",
-          );
-        const newSessionRequest = requests.find((request) => request.method === "session/new");
-        assert.isDefined(newSessionRequest);
-        const params = newSessionRequest!.params as { mcpServers?: unknown };
-        assert.deepEqual(params.mcpServers, [
-          {
-            type: "http",
-            name: "t3-code",
-            url: endpoint,
-            headers: [{ name: "Authorization", value: authorizationHeader }],
-          },
-        ]);
-      }).pipe(
-        Effect.ensuring(
-          Effect.gen(function* () {
-            yield* adapter.stopSession(threadId).pipe(Effect.ignore);
-            yield* Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId));
+        yield* Effect.sync(() =>
+          McpProviderSession.setMcpProviderSession({
+            environmentId: EnvironmentId.make("devin-mcp-test-environment"),
+            threadId,
+            providerSessionId: "devin-mcp-test-session",
+            providerInstanceId: ProviderInstanceId.make("devin"),
+            endpoint,
+            authorizationHeader,
           }),
-        ),
-      );
-    }),
+        );
+
+        yield* Effect.gen(function* () {
+          yield* adapter.startSession({
+            threadId,
+            provider: ProviderDriverKind.make("devin"),
+            cwd: process.cwd(),
+            runtimeMode: "full-access",
+            modelSelection: devinModelSelection("default"),
+          });
+
+          yield* adapter.sendTurn({ threadId, input: "Use the test tool." });
+
+          const logContents = yield* Effect.promise(() => NodeFSP.readFile(requestLogPath, "utf8"));
+          const requests = logContents
+            .split("\n")
+            .filter((line) => line.trim().length > 0)
+            .map((line): { method?: string; params?: unknown } | undefined => {
+              try {
+                return JSON.parse(line) as { method?: string; params?: unknown };
+              } catch {
+                return undefined;
+              }
+            })
+            .filter(
+              (value): value is { method: string; params: unknown } =>
+                value !== undefined && typeof value.method === "string",
+            );
+          const newSessionRequest = requests.find((request) => request.method === "session/new");
+          assert.isDefined(newSessionRequest);
+          const params = newSessionRequest!.params as {
+            cwd: string;
+            mcpServers: unknown[];
+            additionalDirectories: string[];
+          };
+          assert.equal(params.cwd, process.cwd());
+          assert.isEmpty(params.mcpServers);
+          assert.lengthOf(params.additionalDirectories, 1);
+          const directory = params.additionalDirectories[0]!;
+          const connection = requests.find(
+            (request) => request.method === "_cognition.ai/mcp/connectServer",
+          );
+          assert.deepEqual(connection?.params, { serverId: "t3-code", workspaceDirs: [directory] });
+          const config = yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(directory, ".devin/mcp_config.local.json"), "utf8"),
+          );
+          assert.include(config, authorizationHeader);
+          assert.include(config, endpoint);
+          assert.notInclude(logContents, authorizationHeader);
+          yield* adapter.stopSession(threadId);
+          const exists = yield* Effect.promise(() =>
+            NodeFSP.stat(directory).then(
+              () => true,
+              () => false,
+            ),
+          );
+          assert.isFalse(exists);
+        }).pipe(
+          Effect.ensuring(
+            Effect.gen(function* () {
+              yield* adapter.stopSession(threadId).pipe(Effect.ignore);
+              yield* Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId));
+            }),
+          ),
+        );
+      }),
   );
 
   it.effect("keeps the session ready after rejecting an empty prompt", () =>

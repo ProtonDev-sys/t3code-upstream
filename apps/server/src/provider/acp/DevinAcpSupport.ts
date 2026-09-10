@@ -31,7 +31,8 @@ type DevinAcpRuntimeSettings = Pick<DevinSettings, "binaryPath">;
 
 export const DEVIN_ACP_CLIENT_CAPABILITIES = {
   _meta: {
-    "cognition.ai/requestDiagnostics": true,
+    "cognition.ai/mcp": true,
+    "cognition.ai/mcpWorkspaceDirs": true,
   },
 } satisfies NonNullable<EffectAcpSchema.InitializeRequest["clientCapabilities"]>;
 

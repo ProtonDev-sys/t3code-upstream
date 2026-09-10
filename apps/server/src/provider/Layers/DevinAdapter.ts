@@ -46,6 +46,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { prepareDevinMcp } from "../acp/DevinMcp.ts";
 import {
   type ProviderAdapterError,
   ProviderAdapterProcessError,
@@ -954,31 +955,31 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
           ? yield* options.resolveSettings
           : devinSettings;
         const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+        const connectMcp = mcpSession
+          ? yield* prepareDevinMcp(mcpSession).pipe(
+              Effect.provideService(Scope.Scope, sessionScope),
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapterProcessError({
+                    provider: PROVIDER,
+                    threadId: input.threadId,
+                    detail: "Failed to prepare Devin's T3 Code tool connection.",
+                    cause,
+                  }),
+              ),
+            )
+          : undefined;
 
         const acp = yield* makeDevinAcpRuntime({
           devinSettings: effectiveDevinSettings,
           ...(options?.environment ? { environment: options.environment } : {}),
           childProcessSpawner,
           cwd: input.cwd,
+          ...(connectMcp ? { additionalDirectories: [connectMcp.directory] } : {}),
           ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
           clientInfo: { name: "t3-code", version: "0.0.0" },
-          ...(mcpSession
-            ? {
-                mcpServers: [
-                  {
-                    type: "http" as const,
-                    name: "t3-code",
-                    url: mcpSession.endpoint,
-                    headers: [
-                      {
-                        name: "Authorization",
-                        value: mcpSession.authorizationHeader,
-                      },
-                    ],
-                  },
-                ],
-              }
-            : {}),
           ...acpNativeLoggers,
         }).pipe(
           Effect.provideService(Crypto.Crypto, crypto),
@@ -1077,7 +1078,9 @@ export function makeDevinAdapter(devinSettings: DevinSettings, options?: DevinAd
               }),
             ),
           );
-          return yield* acp.start();
+          const result = yield* acp.start();
+          if (connectMcp) yield* connectMcp.connect(acp);
+          return result;
         }).pipe(
           Effect.mapError((error) =>
             mapAcpToAdapterError(PROVIDER, input.threadId, "session/start", error),

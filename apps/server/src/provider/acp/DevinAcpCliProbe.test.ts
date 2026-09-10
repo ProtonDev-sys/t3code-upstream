@@ -5,6 +5,7 @@
  *
  * Set T3_DEVIN_LIVE_TURN=1 to send a real prompt. This consumes Devin usage.
  * Set T3_DEVIN_MCP_SMOKE=1 to drive a real turn through the local T3 MCP server.
+ * T3_DEVIN_TEST_MODEL selects the model used by the MCP and resume checks.
  * The regular Devin adapter tests use the local ACP fixture for permissions,
  * cancellation, image input, and failure recovery; these checks validate the
  * installed CLI's command and ACP compatibility at the opt-in boundary.
@@ -364,19 +365,13 @@ describe.runIf(process.env.T3_DEVIN_MCP_SMOKE === "1")("Devin MCP smoke", () => 
           }).pipe(Effect.forkScoped);
           yield* Effect.yieldNow;
 
-          const nativeAcpEvents: unknown[] = [];
           const adapter = yield* makeDevinAdapter(makeProbeSettings(), {
             environment: process.env,
             promptTimeout: Duration.seconds(180),
-            nativeEventLogger: {
-              filePath: "devin-mcp-smoke-native-events",
-              write: (event) => Effect.sync(() => nativeAcpEvents.push(event)),
-              close: () => Effect.void,
-            },
           });
           yield* Effect.addFinalizer(() => adapter.stopSession(threadId).pipe(Effect.ignore));
           const runtimeEvents: ProviderRuntimeEvent[] = [];
-          const turnCompleted = yield* Deferred.make<void>();
+          let turnCompleted = yield* Deferred.make<void>();
           yield* Stream.runForEach(adapter.streamEvents, (event) => {
             if (event.threadId !== threadId) return Effect.void;
             runtimeEvents.push(event);
@@ -386,35 +381,20 @@ describe.runIf(process.env.T3_DEVIN_MCP_SMOKE === "1")("Devin MCP smoke", () => 
           }).pipe(Effect.forkScoped);
           yield* Effect.yieldNow;
 
-          yield* adapter.startSession({
+          const session = yield* adapter.startSession({
             threadId,
             provider: ProviderDriverKind.make("devin"),
             cwd: workspace,
             runtimeMode: "full-access",
-            modelSelection: { instanceId: providerInstanceId, model: "adaptive" },
+            modelSelection: {
+              instanceId: providerInstanceId,
+              model: process.env.T3_DEVIN_TEST_MODEL ?? "adaptive",
+            },
           });
-          const sessionNewRequest = nativeAcpEvents
-            .map(
-              (record) =>
-                record as {
-                  readonly event?: {
-                    readonly kind?: unknown;
-                    readonly payload?: {
-                      readonly method?: unknown;
-                      readonly request?: { readonly fieldCount?: unknown };
-                    };
-                  };
-                },
-            )
-            .find(
-              (record) =>
-                record.event?.kind === "request" && record.event.payload?.method === "session/new",
-            );
-          expect(sessionNewRequest?.event?.payload?.request?.fieldCount).toBe(2);
           yield* adapter.sendTurn({
             threadId,
             input:
-              "Use the T3 Code MCP tool preview_status exactly once. After the tool succeeds, reply exactly T3_DEVIN_MCP_OK and do not use any other tool.",
+              "Call the MCP tool preview_status on t3-code exactly once. After the tool succeeds, reply exactly T3_DEVIN_MCP_OK and do not use any other tool.",
           });
           yield* Deferred.await(turnCompleted);
 
@@ -422,7 +402,7 @@ describe.runIf(process.env.T3_DEVIN_MCP_SMOKE === "1")("Devin MCP smoke", () => 
             .filter((event) => event.type === "content.delta")
             .map((event) => event.payload.delta)
             .join("");
-          expect(requests).toHaveLength(1);
+          expect(requests, `Devin reply: ${assistantText}`).toHaveLength(1);
           expect(assistantText).toContain("T3_DEVIN_MCP_OK");
           expect(
             requests.some(
@@ -434,6 +414,42 @@ describe.runIf(process.env.T3_DEVIN_MCP_SMOKE === "1")("Devin MCP smoke", () => 
               (request) => request.threadId === threadId && request.operation === "status",
             ),
           ).toBe(true);
+
+          yield* adapter.stopSession(threadId);
+          yield* registry.revokeProviderSession(issued.config.providerSessionId);
+          expect(yield* registry.resolve(issuedToken)).toBeUndefined();
+          const renewed = yield* registry.issue({ threadId, providerInstanceId });
+          yield* Effect.addFinalizer(() =>
+            registry.revokeProviderSession(renewed.config.providerSessionId),
+          );
+          McpProviderSession.setMcpProviderSession(renewed.config);
+          turnCompleted = yield* Deferred.make<void>();
+          yield* Effect.promise(() =>
+            NodeFSP.writeFile(NodePath.join(workspace, "input.txt"), "T3_WORKSPACE_OK"),
+          );
+          yield* adapter.startSession({
+            threadId,
+            provider: ProviderDriverKind.make("devin"),
+            cwd: workspace,
+            runtimeMode: "full-access",
+            resumeCursor: session.resumeCursor,
+            modelSelection: {
+              instanceId: providerInstanceId,
+              model: process.env.T3_DEVIN_TEST_MODEL ?? "adaptive",
+            },
+          });
+          yield* adapter.sendTurn({
+            threadId,
+            input:
+              "Read input.txt in the project and write its text into output.txt. Call preview_status on t3-code once again using the live MCP tool, even though you called it earlier. Then reply T3_DEVIN_RESUMED_OK.",
+          });
+          yield* Deferred.await(turnCompleted);
+          expect(requests).toHaveLength(2);
+          expect(
+            (yield* Effect.promise(() =>
+              NodeFSP.readFile(NodePath.join(workspace, "output.txt"), "utf8"),
+            )).trimEnd(),
+          ).toBe("T3_WORKSPACE_OK");
         }),
       ).pipe(Effect.provide(DevinMcpSmokeLayer)),
     { timeout: 190_000 },

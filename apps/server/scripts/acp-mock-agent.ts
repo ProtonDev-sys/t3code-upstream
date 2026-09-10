@@ -1354,6 +1354,9 @@ const program = Effect.gen(function* () {
   );
 
   yield* agent.handleUnknownExtRequest((method, params) => {
+    if (method === "_cognition.ai/mcp/connectServer") {
+      return Effect.succeed({ connectionStatus: "connected" });
+    }
     if (method === "_test/environment") {
       return Effect.succeed({
         inherited: process.env.T3_ACP_RUNTIME_AMBIENT === "sentinel",
