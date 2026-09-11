@@ -8,6 +8,7 @@ import type * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
 import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
+import { collectSessionConfigOptionValues } from "./AcpRuntimeModel.ts";
 import { devinModelGroupKey, parseDevinModelUid } from "../Layers/DevinProvider.ts";
 
 export { inferDevinContextWindowTokens } from "../Layers/DevinProvider.ts";
@@ -89,7 +90,10 @@ export interface DevinAcpModelSelectionErrorContext {
 }
 
 export function applyDevinAcpModelSelection<E>(input: {
-  readonly runtime: Pick<AcpSessionRuntime.AcpSessionRuntime["Service"], "setModel">;
+  readonly runtime: Pick<
+    AcpSessionRuntime.AcpSessionRuntime["Service"],
+    "setModel" | "getConfigOptions"
+  >;
   readonly model: string | null | undefined;
   readonly selections?: ReadonlyArray<ProviderOptionSelection> | null | undefined;
   readonly mapError: (context: DevinAcpModelSelectionErrorContext) => E;
@@ -111,7 +115,31 @@ export function applyDevinAcpModelSelection<E>(input: {
           (candidate): candidate is string => candidate !== null && candidate !== model,
         )
       : [];
-  const setModel = input.runtime.setModel(model).pipe(
+  const setModel = input.runtime.getConfigOptions.pipe(
+    Effect.flatMap((configOptions) => {
+      const option = configOptions.find(
+        (entry) => entry.category === "model" || entry.id === "model",
+      );
+      const values = option ? collectSessionConfigOptionValues(option) : [];
+      const hasVariantSelection = input.selections?.some((selection) =>
+        ["reasoning", "contextWindow", "speed"].includes(selection.id),
+      );
+      let selected = model;
+      // Family rows are not always valid ACP values (SWE-2 only advertises
+      // suffixed variants). Preserve concrete IDs and otherwise use an
+      // advertised default within the requested family.
+      if (!hasVariantSelection) {
+        const requested = input.model?.trim();
+        if (requested && values.includes(requested)) {
+          selected = requested;
+        } else if (!values.includes(model)) {
+          const family = values.filter((value) => resolveDevinAcpBaseModelId(value) === base);
+          const current = option?.type === "select" ? option.currentValue : undefined;
+          selected = current && family.includes(current) ? current : (family[0] ?? model);
+        }
+      }
+      return input.runtime.setModel(selected);
+    }),
     Effect.catch((cause) => {
       const fallback = fallbackCandidates[0];
       return fallback === undefined

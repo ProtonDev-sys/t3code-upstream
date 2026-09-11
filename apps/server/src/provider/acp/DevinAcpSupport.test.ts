@@ -1,6 +1,8 @@
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { describe, expect } from "vite-plus/test";
+import type { ProviderOptionSelection } from "@t3tools/contracts";
+import { AcpRequestError } from "effect-acp/errors";
 
 import {
   applyDevinAcpModelSelection,
@@ -33,10 +35,102 @@ describe("buildDevinAcpSpawnInput", () => {
 });
 
 describe("applyDevinAcpModelSelection", () => {
+  const variants = ["swe-2-high", "swe-2-medium", "swe-2-max"];
+  const swe2Config = (currentValue: string) => [
+    {
+      id: "model",
+      name: "Model",
+      category: "model",
+      type: "select" as const,
+      currentValue,
+      options: [
+        {
+          group: "SWE-2",
+          name: "SWE-2",
+          options: variants.map((value) => ({ value, name: value })),
+        },
+      ],
+    },
+  ];
+  const swe2Cases: ReadonlyArray<{
+    name: string;
+    model: string;
+    current: string;
+    expected: string;
+    selections?: ReadonlyArray<ProviderOptionSelection>;
+  }> = [
+    {
+      name: "uses the current advertised variant for a family",
+      model: "swe-2",
+      current: "swe-2-medium",
+      expected: "swe-2-medium",
+    },
+    {
+      name: "uses the first family variant when the current model differs",
+      model: "swe-2",
+      current: "unrelated-model",
+      expected: "swe-2-high",
+    },
+    {
+      name: "preserves an explicit concrete variant",
+      model: "swe-2-max",
+      current: "swe-2-high",
+      expected: "swe-2-max",
+    },
+    {
+      name: "honors the selected reasoning level",
+      model: "swe-2",
+      current: "swe-2-high",
+      selections: [{ id: "reasoning", value: "max" }],
+      expected: "swe-2-max",
+    },
+  ];
+  for (const example of swe2Cases) {
+    it.effect(`SWE-2 ${example.name}`, () => {
+      const calls: string[] = [];
+      return applyDevinAcpModelSelection({
+        model: example.model,
+        selections: example.selections,
+        runtime: {
+          getConfigOptions: Effect.succeed(swe2Config(example.current)),
+          setModel: (model) =>
+            Effect.sync(() => {
+              expect(variants).toContain(model);
+              calls.push(model);
+            }),
+        },
+        mapError: ({ cause }) => cause,
+      }).pipe(Effect.tap(() => Effect.sync(() => expect(calls).toEqual([example.expected]))));
+    });
+  }
+
+  it.effect("SWE-2 rejects an unavailable explicit option instead of silently changing it", () => {
+    const calls: string[] = [];
+    return applyDevinAcpModelSelection({
+      model: "swe-2",
+      selections: [{ id: "reasoning", value: "low" }],
+      runtime: {
+        getConfigOptions: Effect.succeed(swe2Config("swe-2-high")),
+        setModel: (model) =>
+          Effect.suspend(() => {
+            calls.push(model);
+            return variants.includes(model)
+              ? Effect.void
+              : Effect.fail(AcpRequestError.invalidParams("Unavailable SWE-2 variant"));
+          }),
+      },
+      mapError: ({ cause }) => cause,
+    }).pipe(
+      Effect.flip,
+      Effect.tap(() => Effect.sync(() => expect(calls).toEqual(["swe-2-low"]))),
+    );
+  });
+
   it.effect("selects the requested model through ACP config", () => {
     const calls: string[] = [];
     return applyDevinAcpModelSelection({
       runtime: {
+        getConfigOptions: Effect.succeed([]),
         setModel: (model) => Effect.sync(() => calls.push(model)).pipe(Effect.asVoid),
       },
       model: "claude-sonnet-4-6",
@@ -48,6 +142,7 @@ describe("applyDevinAcpModelSelection", () => {
     const calls: string[] = [];
     return applyDevinAcpModelSelection({
       runtime: {
+        getConfigOptions: Effect.succeed([]),
         setModel: (model) => Effect.sync(() => calls.push(model)).pipe(Effect.asVoid),
       },
       model: "claude-opus-5",
@@ -60,6 +155,7 @@ describe("applyDevinAcpModelSelection", () => {
     const calls: string[] = [];
     return applyDevinAcpModelSelection({
       runtime: {
+        getConfigOptions: Effect.succeed([]),
         setModel: (model) =>
           Effect.gen(function* () {
             calls.push(model);
