@@ -9,7 +9,6 @@ export function getCodexDaybreakState(
     .find((candidate) => candidate.slug === model)
     ?.capabilities?.optionDescriptors?.find((option) => option.id === "cyberAccessProgram");
   const selectedProgram = selections?.find((option) => option.id === "cyberAccessProgram")?.value;
-  const enabled = selectedProgram === "daybreakBlue" || selectedProgram === "daybreakRed";
   const programs =
     descriptor?.type === "select" ? descriptor.options.map((option) => option.id) : [];
   const daybreakPrograms = programs.filter(
@@ -17,7 +16,11 @@ export function getCodexDaybreakState(
   );
   const program =
     daybreakPrograms.find((value) => value === selectedProgram) ?? daybreakPrograms[0];
-  return { enabled, program, canEnable: program !== undefined && programs.includes("standard") };
+  return {
+    enabled: program !== undefined && program === selectedProgram,
+    program,
+    canEnable: program !== undefined && programs.includes("standard"),
+  };
 }
 
 export function withCodexDaybreakSelection(
@@ -50,10 +53,7 @@ export function getCodexDaybreakModelSlugs(
 ): ReadonlySet<string> | undefined {
   const selectedProgram = selections?.find((option) => option.id === "cyberAccessProgram")?.value;
   if (selectedProgram !== "daybreakBlue" && selectedProgram !== "daybreakRed") return undefined;
-  if (!models.some((model) => getCodexDaybreakState([model], model.slug, selections).canEnable)) {
-    return undefined;
-  }
-  return new Set(
+  const slugs = new Set(
     models
       .filter((model) => {
         const state = getCodexDaybreakState([model], model.slug, selections);
@@ -61,4 +61,5 @@ export function getCodexDaybreakModelSlugs(
       })
       .map((model) => model.slug),
   );
+  return slugs.size > 0 ? slugs : undefined;
 }

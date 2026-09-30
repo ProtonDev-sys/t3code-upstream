@@ -55,7 +55,7 @@ describe("Codex Daybreak options", () => {
         { id: "cyberAccessProgram", value: "daybreakBlue" },
       ]),
     ).toEqual({
-      enabled: true,
+      enabled: false,
       program: undefined,
       canEnable: false,
     });
@@ -65,11 +65,11 @@ describe("Codex Daybreak options", () => {
     const models = [modelWithPrograms(["standard", "daybreakBlue"])];
     const selection = [{ id: "cyberAccessProgram", value: "daybreakRed" }];
     expect(getCodexDaybreakState(models, "gpt-6-sol", selection)).toEqual({
-      enabled: true,
+      enabled: false,
       program: "daybreakBlue",
       canEnable: true,
     });
-    expect(getCodexDaybreakModelSlugs(models, selection)?.size).toBe(0);
+    expect(getCodexDaybreakModelSlugs(models, selection)).toBeUndefined();
   });
 
   it("preserves other options and explicitly restores standard treatment when turned off", () => {
