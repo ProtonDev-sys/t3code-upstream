@@ -434,6 +434,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
           modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
             { id: "reasoningEffort", value: "high" },
             { id: "serviceTier", value: "priority" },
+            { id: "cyberAccessProgram", value: "daybreakBlue" },
           ]),
           attachments: [],
         }),
@@ -444,7 +445,19 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         model: "gpt-5.3-codex",
         effort: "high",
         serviceTier: "priority",
+        cyberAccessProgram: "daybreakBlue",
       });
+
+      runtime.sendTurnImpl.mockClear();
+      yield* adapter.sendTurn({
+        threadId: asThreadId("sess-missing"),
+        input: "hello again",
+        modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-6-sol", [
+          { id: "cyberAccessProgram", value: "standard" },
+        ]),
+        attachments: [],
+      });
+      NodeAssert.equal(runtime.sendTurnImpl.mock.calls[0]?.[0].cyberAccessProgram, "standard");
     }),
   );
 

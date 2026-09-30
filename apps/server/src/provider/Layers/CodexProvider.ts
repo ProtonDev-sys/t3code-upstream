@@ -216,6 +216,21 @@ export function mapCodexModelCapabilities(
     });
   }
 
+  const cyberPrograms = model.availableAccessPrograms?.cyber ?? [];
+  if (cyberPrograms.some((program) => program !== "standard")) {
+    optionDescriptors.push({
+      id: "cyberAccessProgram",
+      label: "Daybreak",
+      type: "select",
+      options: cyberPrograms.map((program) => ({
+        id: program,
+        label: program === "standard" ? "Off" : program === "daybreakBlue" ? "Blue" : "Red",
+        ...(program === "standard" ? { isDefault: true } : {}),
+      })),
+      ...(cyberPrograms.includes("standard") ? { currentValue: "standard" } : {}),
+    });
+  }
+
   return createModelCapabilities({
     optionDescriptors,
   });

@@ -2,6 +2,47 @@ import { assert, it } from "@effect/vitest";
 
 import { applyPreferredCodexDefaultModel, mapCodexModelCapabilities } from "./CodexProvider.ts";
 
+it("only offers Daybreak programs advertised for the account and model", () => {
+  const model = {
+    additionalSpeedTiers: [],
+    defaultReasoningEffort: "medium",
+    description: "Test model",
+    displayName: "GPT Test",
+    hidden: false,
+    id: "gpt-test",
+    isDefault: true,
+    model: "gpt-test",
+    supportedReasoningEfforts: [],
+  };
+  for (const program of ["daybreakBlue", "daybreakRed"] as const) {
+    const capabilities = mapCodexModelCapabilities({
+      ...model,
+      availableAccessPrograms: { cyber: ["standard", program] },
+    });
+    assert.deepStrictEqual(capabilities.optionDescriptors, [
+      {
+        id: "cyberAccessProgram",
+        label: "Daybreak",
+        type: "select",
+        options: [
+          { id: "standard", label: "Off", isDefault: true },
+          { id: program, label: program === "daybreakBlue" ? "Blue" : "Red" },
+        ],
+        currentValue: "standard",
+      },
+    ]);
+  }
+  for (const availableAccessPrograms of [undefined, null, { cyber: ["standard"] as const }]) {
+    assert.deepStrictEqual(
+      mapCodexModelCapabilities({
+        ...model,
+        ...(availableAccessPrograms === undefined ? {} : { availableAccessPrograms }),
+      }).optionDescriptors,
+      [],
+    );
+  }
+});
+
 it("maps current Codex model capability fields", () => {
   const capabilities = mapCodexModelCapabilities({
     additionalSpeedTiers: [],

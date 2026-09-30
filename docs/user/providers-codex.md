@@ -25,6 +25,18 @@ T3 Code can use your installed Codex and its existing login. Run `codex login`
 on the environment's machine to sign in. [Provider setup](./install.md#providers)
 covers installation and custom configuration.
 
+## Daybreak
+
+Daybreak can be requested from the Codex model picker for models that advertise
+it for your account. The control appears only when browsing a Codex account.
+Enabling it selects a compatible model and limits that account's model list to
+models supporting the selected Daybreak program. The choice is saved with your
+model options and applies to subsequent turns; turning it off restores the full
+model list and standard treatment. It does not grant
+access, and some cybersecurity requests remain limited even when enabled.
+If the control is unavailable, choose an eligible model or check your approved
+Daybreak access with OpenAI.
+
 ## Use multiple accounts
 
 Add another ChatGPT account in **Settings → Providers**, then select the account

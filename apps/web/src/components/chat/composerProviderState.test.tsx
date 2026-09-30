@@ -73,6 +73,25 @@ const ULTRATHINK_FRAME_CLASSES = {
 } as const;
 
 describe("getComposerProviderState", () => {
+  it.each(["daybreakBlue", "standard"])(
+    "dispatches explicit %s without treating Daybreak as reasoning",
+    (program) => {
+      const state = getComposerProviderState({
+        provider: PROVIDER,
+        model: MODEL,
+        models: modelWith([
+          selectDescriptor("cyberAccessProgram", [
+            { id: "standard", label: "Off", isDefault: true },
+            { id: "daybreakBlue", label: "Blue" },
+          ]),
+        ]),
+        modelOptions: selections(["cyberAccessProgram", program]),
+        planModeEnabled: false,
+      });
+      expect(state.modelOptionsForDispatch).toEqual(selections(["cyberAccessProgram", program]));
+      expect(state.promptEffort).toBeNull();
+    },
+  );
   it("derives a stable prompt injection state for ordinary prompt edits", () => {
     expect(getComposerPromptInjectionState("Investigate this failure")).toBe("none");
     expect(getComposerPromptInjectionState("Ultrathink:\nInvestigate this failure")).toBe(

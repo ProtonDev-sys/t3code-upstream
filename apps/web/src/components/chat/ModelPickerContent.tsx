@@ -7,7 +7,16 @@ import {
 import { resolveSelectableModel } from "@t3tools/shared/model";
 import { useAtomValue } from "@effect/atom-react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { memo, useMemo, useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import {
+  memo,
+  useMemo,
+  useState,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type ReactNode,
+} from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
@@ -176,6 +185,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
    * model set but are free to diverge via customModels).
    */
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
+  modelOptionsControl?: (entry: ProviderInstanceEntry | undefined) => ReactNode;
+  isModelVisible?: (entry: ProviderInstanceEntry, model: ModelEsque) => boolean;
   terminalOpen: boolean;
   onRequestClose?: () => void;
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
@@ -371,7 +382,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             option: model,
             activeInstanceId: props.activeInstanceId,
             activeModel: activeModelSlug,
-          })
+          }) ||
+          props.isModelVisible?.(entry, model) === false
         ) {
           continue;
         }
@@ -394,7 +406,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       }
     }
     return out;
-  }, [modelOptionsByInstance, entryByInstanceId, props.activeInstanceId, activeModelSlug]);
+  }, [
+    modelOptionsByInstance,
+    entryByInstanceId,
+    props.activeInstanceId,
+    activeModelSlug,
+    props.isModelVisible,
+  ]);
 
   const isLocked = props.lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;
@@ -1051,6 +1069,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           </div>
         </Combobox>
       </div>
+      {props.modelOptionsControl?.(selectedEntry)}
     </TooltipProvider>
   );
 });

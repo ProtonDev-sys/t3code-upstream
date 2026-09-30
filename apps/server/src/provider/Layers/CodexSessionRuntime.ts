@@ -146,6 +146,7 @@ const isMcpElicitationForm = Schema.is(McpElicitationForm);
 // `V2TurnStartParams` schema includes its experimental fields directly.
 const CodexTurnStartParamsWithCollaborationMode = EffectCodexSchema.V2TurnStartParams.pipe(
   Schema.fieldsAssign({
+    cyberAccessProgram: Schema.optionalKey(EffectCodexSchema.V2TurnStartParams__CyberAccessProgram),
     collaborationMode: Schema.optionalKey(EffectCodexSchema.V2TurnStartParams__CollaborationMode),
     additionalContext: Schema.optionalKey(
       Schema.Record(Schema.String, EffectCodexSchema.V2TurnStartParams__AdditionalContextEntry),
@@ -190,6 +191,7 @@ export interface CodexSessionRuntimeOptions {
 }
 
 export interface CodexSessionRuntimeSendTurnInput {
+  readonly cyberAccessProgram?: EffectCodexSchema.V2TurnStartParams__CyberAccessProgram | undefined;
   readonly input?: string;
   readonly attachments?: ReadonlyArray<{
     readonly type: "localImage";
@@ -619,6 +621,7 @@ const SKILL_MENTION_PATTERN =
   /(^|\s)\p{Sc}(?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])([a-zA-Z0-9][a-zA-Z0-9:_-]*)(?=\s|$)/gu;
 
 export function buildTurnStartParams(input: {
+  readonly cyberAccessProgram?: EffectCodexSchema.V2TurnStartParams__CyberAccessProgram;
   readonly threadId: string;
   readonly runtimeMode: RuntimeMode;
   readonly prompt?: string;
@@ -659,6 +662,7 @@ export function buildTurnStartParams(input: {
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
+    ...(input.cyberAccessProgram ? { cyberAccessProgram: input.cyberAccessProgram } : {}),
     threadId: input.threadId,
     input: turnInput,
     approvalPolicy: config.approvalPolicy,
@@ -2565,6 +2569,7 @@ export const makeCodexSessionRuntime = (
           const models = options.models ? yield* options.models : [];
           const modelName = models.find((model) => model.slug === normalizedModel)?.name;
           const params = yield* buildTurnStartParams({
+            ...(input.cyberAccessProgram ? { cyberAccessProgram: input.cyberAccessProgram } : {}),
             threadId: providerThreadId,
             runtimeMode: options.runtimeMode,
             ...(input.input ? { prompt: input.input } : {}),

@@ -46,7 +46,10 @@ import * as CodexErrors from "effect-codex-app-server/errors";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
-import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
+import {
+  getCodexCyberAccessProgramOptionValue,
+  getCodexServiceTierOptionValue,
+} from "../../codexModelOptions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 
 import {
@@ -2608,6 +2611,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         session = yield* requireSession(input.threadId);
       }
     }
+    const cyberAccessProgram =
+      input.modelSelection?.instanceId === boundInstanceId
+        ? getCodexCyberAccessProgramOptionValue(input.modelSelection)
+        : undefined;
     const reasoningEffort =
       input.modelSelection?.instanceId === boundInstanceId
         ? getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort")
@@ -2618,6 +2625,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         : undefined;
     return yield* session.runtime
       .sendTurn({
+        ...(cyberAccessProgram ? { cyberAccessProgram } : {}),
         ...(input.input !== undefined ? { input: input.input } : {}),
         ...(input.modelSelection?.instanceId === boundInstanceId
           ? { model: input.modelSelection.model }

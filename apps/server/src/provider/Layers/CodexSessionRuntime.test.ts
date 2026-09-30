@@ -160,6 +160,26 @@ function makeThreadOpenResponse(
 }
 
 describe("buildTurnStartParams", () => {
+  it.effect("preserves explicit Daybreak and off selections on the wire", () =>
+    Effect.gen(function* () {
+      for (const cyberAccessProgram of ["standard", "daybreakBlue", "daybreakRed"] as const) {
+        const params = yield* buildTurnStartParams({
+          threadId: "thread-daybreak",
+          runtimeMode: "auto",
+          model: "gpt-6-sol",
+          prompt: "Hello",
+          cyberAccessProgram,
+        });
+        NodeAssert.equal(params.cyberAccessProgram, cyberAccessProgram);
+        NodeAssert.equal(params.model, "gpt-6-sol");
+      }
+      const params = yield* buildTurnStartParams({
+        threadId: "thread-daybreak",
+        runtimeMode: "auto",
+      });
+      NodeAssert.equal("cyberAccessProgram" in params, false);
+    }),
+  );
   it.effect("sends currency skill aliases in Codex's canonical dollar form", () =>
     Effect.gen(function* () {
       for (const symbol of ["€", "£", "¥", "₹", "₩", "₿", "𑿝"]) {

@@ -244,6 +244,8 @@ import {
 import { useEnvironmentQuery } from "~/state/query";
 import { useDebouncedValue } from "~/state/queries";
 import { ProviderModelPicker } from "./ProviderModelPicker";
+import { CodexDaybreakToggle } from "./CodexDaybreakToggle";
+import { getCodexDaybreakModelSlugs } from "../../codexDaybreak";
 import { resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
@@ -2071,6 +2073,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     return out;
   }, [providerInstanceEntries, selectedInstanceId, selectedModelForPicker, settings]);
+  const daybreakModelSlugsByInstance = useMemo(() => {
+    const slugsByInstance = new Map<ProviderInstanceId, ReadonlySet<string>>();
+    for (const entry of providerInstanceEntries) {
+      if (entry.driverKind !== "codex") continue;
+      const slugs = getCodexDaybreakModelSlugs(
+        entry.models,
+        composerModelOptions?.[entry.instanceId],
+      );
+      if (slugs) slugsByInstance.set(entry.instanceId, slugs);
+    }
+    return slugsByInstance;
+  }, [providerInstanceEntries, composerModelOptions]);
   const selectedModelForPickerWithCustomFallback = useMemo(() => {
     const currentOptions = modelOptionsByInstance.get(selectedInstanceId) ?? [];
     return currentOptions.some((option) => option.slug === selectedModelForPicker)
@@ -5018,6 +5032,28 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ) : null}
       <ProviderModelPicker
         isComposerOwned
+        modelOptionsControl={(entry) =>
+          entry?.driverKind === "codex" ? (
+            <CodexDaybreakToggle
+              key={entry.instanceId}
+              instanceId={entry.instanceId}
+              model={entry.instanceId === selectedInstanceId ? selectedModel : ""}
+              models={entry.models}
+              modelOptions={composerModelOptions?.[entry.instanceId]}
+              disabled={!entry.enabled || !entry.isAvailable || entry.status !== "ready"}
+              getModelDisabledReason={getModelDisabledReason}
+              onModelChange={(model) => {
+                setMultipleModelSelections(null);
+                onProviderModelSelect(entry.instanceId, model, { focusComposer: false });
+              }}
+              {...(routeKind === "server" ? { threadRef: routeThreadRef } : {})}
+              {...(routeKind === "draft" && draftId ? { draftId } : {})}
+            />
+          ) : null
+        }
+        isModelVisible={(entry, model) =>
+          daybreakModelSlugsByInstance.get(entry.instanceId)?.has(model.slug) ?? true
+        }
         disabled={providerCatalogPending || isSendBusy}
         {...(routeKind === "draft" && supportsMultipleModels
           ? {
