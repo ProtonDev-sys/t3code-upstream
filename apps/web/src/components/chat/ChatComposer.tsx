@@ -2085,6 +2085,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     return slugsByInstance;
   }, [providerInstanceEntries, composerModelOptions]);
+  const isDaybreakModelVisible = useCallback(
+    (entry: ProviderInstanceEntry, model: Pick<AppModelOption, "slug">) =>
+      daybreakModelSlugsByInstance.get(entry.instanceId)?.has(model.slug) ?? true,
+    [daybreakModelSlugsByInstance],
+  );
   const selectedModelForPickerWithCustomFallback = useMemo(() => {
     const currentOptions = modelOptionsByInstance.get(selectedInstanceId) ?? [];
     return currentOptions.some((option) => option.slug === selectedModelForPicker)
@@ -5056,9 +5061,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               />
             ))
         }
-        isModelVisible={(entry, model) =>
-          daybreakModelSlugsByInstance.get(entry.instanceId)?.has(model.slug) ?? true
-        }
+        isModelVisible={isDaybreakModelVisible}
         disabled={providerCatalogPending || isSendBusy}
         {...(routeKind === "draft" && supportsMultipleModels
           ? {
