@@ -28,14 +28,14 @@ covers installation and custom configuration.
 ## Daybreak
 
 Daybreak can be requested from the Codex model picker for models that advertise
-it for your account. The control appears only when browsing a Codex account.
+it for your account. The control appears for eligible Codex accounts, including
+in Favorites.
 Enabling it selects a compatible model and limits that account's model list to
 models supporting the selected Daybreak program. The choice is saved with your
 model options and applies to subsequent turns; turning it off restores the full
 model list and standard treatment. It does not grant
 access, and some cybersecurity requests remain limited even when enabled.
-If the control is unavailable, choose an eligible model or check your approved
-Daybreak access with OpenAI.
+If the control is unavailable, check your approved Daybreak access with OpenAI.
 
 ## Use multiple accounts
 

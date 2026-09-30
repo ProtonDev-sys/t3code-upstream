@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ProviderDriverKind, type ProviderOptionDescriptor } from "@t3tools/contracts";
-import { buildTraitsTriggerDisplay, buildUnavailableModelOptionDescriptors } from "./TraitsPicker";
+import {
+  buildTraitsTriggerDisplay,
+  buildUnavailableModelOptionDescriptors,
+  shouldRenderTraitsControls,
+} from "./TraitsPicker";
 
 function selectDescriptor(
   id: string,
@@ -61,6 +65,34 @@ function display(descriptors: ReadonlyArray<ProviderOptionDescriptor>) {
 }
 
 describe("buildTraitsTriggerDisplay", () => {
+  it("omits Daybreak from the reasoning label", () => {
+    const cyber = selectDescriptor(
+      "cyberAccessProgram",
+      [
+        { id: "standard", label: "Off" },
+        { id: "daybreakBlue", label: "Blue" },
+      ],
+      "daybreakBlue",
+    );
+    expect(display([EFFORT, cyber])).toEqual({ label: "High", showFastModeIcon: false });
+    expect(
+      shouldRenderTraitsControls({
+        provider: CODEX,
+        models: [
+          {
+            slug: "gpt-6-sol",
+            name: "GPT-6-Sol",
+            isCustom: false,
+            capabilities: { optionDescriptors: [cyber] },
+          },
+        ],
+        model: "gpt-6-sol",
+        prompt: "",
+        modelOptions: [{ id: "cyberAccessProgram", value: "daybreakBlue" }],
+        planModeEnabled: false,
+      }),
+    ).toBe(false);
+  });
   it("omits fast mode from the label entirely when it is off", () => {
     expect(display([EFFORT, fastModeDescriptor(false), CONTEXT_WINDOW])).toEqual({
       label: "High · 1M",

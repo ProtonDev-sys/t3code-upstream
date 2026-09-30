@@ -41,7 +41,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
   keybindings?: ResolvedKeybindingsConfig;
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
-  modelOptionsControl?: (entry: ProviderInstanceEntry | undefined) => ReactNode;
+  modelOptionsControl?: (entries: ReadonlyArray<ProviderInstanceEntry>) => ReactNode;
   isModelVisible?: (entry: ProviderInstanceEntry, model: ModelEsque) => boolean;
   activeProviderIconClassName?: string;
   instanceIndicatorBackground?: string;

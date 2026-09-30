@@ -185,7 +185,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
    * model set but are free to diverge via customModels).
    */
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
-  modelOptionsControl?: (entry: ProviderInstanceEntry | undefined) => ReactNode;
+  modelOptionsControl?: (entries: ReadonlyArray<ProviderInstanceEntry>) => ReactNode;
   isModelVisible?: (entry: ProviderInstanceEntry, model: ModelEsque) => boolean;
   terminalOpen: boolean;
   onRequestClose?: () => void;
@@ -1069,7 +1069,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           </div>
         </Combobox>
       </div>
-      {props.modelOptionsControl?.(selectedEntry)}
+      {props.modelOptionsControl?.(
+        selectedEntry
+          ? [selectedEntry]
+          : instanceEntries.filter((entry) =>
+              favorites.some((favorite) => favorite.provider === entry.instanceId),
+            ),
+      )}
     </TooltipProvider>
   );
 });

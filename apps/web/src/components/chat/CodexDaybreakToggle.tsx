@@ -16,6 +16,7 @@ export function CodexDaybreakToggle(props: {
   model: string;
   models: ReadonlyArray<ServerProviderModel>;
   modelOptions: ReadonlyArray<ProviderOptionSelection> | undefined;
+  accountLabel?: string;
   threadRef?: ScopedThreadRef;
   draftId?: DraftId;
   disabled?: boolean;
@@ -30,6 +31,8 @@ export function CodexDaybreakToggle(props: {
   );
   const target = props.threadRef ?? props.draftId;
   const modelDisabledReason = props.getModelDisabledReason?.(props.instanceId, model);
+  if (!canEnable) return null;
+  const label = `Daybreak ${program === "daybreakRed" ? "Red" : "Blue"}`;
   return (
     <Tooltip>
       <TooltipTrigger
@@ -37,15 +40,14 @@ export function CodexDaybreakToggle(props: {
       >
         <span className="flex items-center gap-2 text-xs text-muted-foreground">
           <ShieldCheckIcon className="size-3.5" aria-hidden="true" />
-          Daybreak
+          {label}
+          {props.accountLabel ? <span className="truncate">· {props.accountLabel}</span> : null}
         </span>
         <Switch
           size="sm"
-          aria-label="Daybreak"
+          aria-label={props.accountLabel ? `${label} · ${props.accountLabel}` : label}
           checked={enabled}
-          disabled={
-            props.disabled || !target || (!enabled && (!canEnable || !!modelDisabledReason))
-          }
+          disabled={props.disabled || !target || (!enabled && !!modelDisabledReason)}
           onCheckedChange={(checked) => {
             const nextProgram = checked ? program : "standard";
             if (!target || !nextProgram) return;
@@ -60,10 +62,8 @@ export function CodexDaybreakToggle(props: {
         />
       </TooltipTrigger>
       <TooltipPopup side="top">
-        {canEnable
-          ? (modelDisabledReason ??
-            `Only models supporting Daybreak ${program === "daybreakRed" ? "Red" : "Blue"} for this Codex account are shown while enabled. Enabling selects ${model}. Approved access is required; some requests remain limited.`)
-          : "Daybreak is not advertised for this Codex account. Verify your approved access."}
+        {modelDisabledReason ??
+          `Only models supporting Daybreak ${program === "daybreakRed" ? "Red" : "Blue"} for this Codex account are shown while enabled. Enabling selects ${model}. Approved access is required; some requests remain limited.`}
       </TooltipPopup>
     </Tooltip>
   );

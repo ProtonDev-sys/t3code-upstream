@@ -5032,24 +5032,29 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ) : null}
       <ProviderModelPicker
         isComposerOwned
-        modelOptionsControl={(entry) =>
-          entry?.driverKind === "codex" ? (
-            <CodexDaybreakToggle
-              key={entry.instanceId}
-              instanceId={entry.instanceId}
-              model={entry.instanceId === selectedInstanceId ? selectedModel : ""}
-              models={entry.models}
-              modelOptions={composerModelOptions?.[entry.instanceId]}
-              disabled={!entry.enabled || !entry.isAvailable || entry.status !== "ready"}
-              getModelDisabledReason={getModelDisabledReason}
-              onModelChange={(model) => {
-                setMultipleModelSelections(null);
-                onProviderModelSelect(entry.instanceId, model, { focusComposer: false });
-              }}
-              {...(routeKind === "server" ? { threadRef: routeThreadRef } : {})}
-              {...(routeKind === "draft" && draftId ? { draftId } : {})}
-            />
-          ) : null
+        modelOptionsControl={(entries) =>
+          entries
+            .filter((candidate) => candidate.driverKind === "codex")
+            .map((candidate) => (
+              <CodexDaybreakToggle
+                key={candidate.instanceId}
+                instanceId={candidate.instanceId}
+                model={candidate.instanceId === selectedInstanceId ? selectedModel : ""}
+                models={candidate.models}
+                modelOptions={composerModelOptions?.[candidate.instanceId]}
+                {...(entries.length > 1 ? { accountLabel: candidate.displayName } : {})}
+                disabled={
+                  !candidate.enabled || !candidate.isAvailable || candidate.status !== "ready"
+                }
+                getModelDisabledReason={getModelDisabledReason}
+                onModelChange={(model) => {
+                  setMultipleModelSelections(null);
+                  onProviderModelSelect(candidate.instanceId, model, { focusComposer: false });
+                }}
+                {...(routeKind === "server" ? { threadRef: routeThreadRef } : {})}
+                {...(routeKind === "draft" && draftId ? { draftId } : {})}
+              />
+            ))
         }
         isModelVisible={(entry, model) =>
           daybreakModelSlugsByInstance.get(entry.instanceId)?.has(model.slug) ?? true

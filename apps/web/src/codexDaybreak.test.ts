@@ -48,7 +48,7 @@ describe("Codex Daybreak options", () => {
     });
   });
 
-  it("keeps a revoked selection visible so it can be turned off", () => {
+  it("does not offer a program when access is revoked", () => {
     const models = [modelWithPrograms(["standard"])];
     expect(
       getCodexDaybreakState(models, "gpt-6-sol", [
@@ -59,6 +59,17 @@ describe("Codex Daybreak options", () => {
       program: undefined,
       canEnable: false,
     });
+  });
+
+  it("offers an available tier when the saved tier is no longer advertised", () => {
+    const models = [modelWithPrograms(["standard", "daybreakBlue"])];
+    const selection = [{ id: "cyberAccessProgram", value: "daybreakRed" }];
+    expect(getCodexDaybreakState(models, "gpt-6-sol", selection)).toEqual({
+      enabled: true,
+      program: "daybreakBlue",
+      canEnable: true,
+    });
+    expect(getCodexDaybreakModelSlugs(models, selection)?.size).toBe(0);
   });
 
   it("preserves other options and explicitly restores standard treatment when turned off", () => {
@@ -129,14 +140,16 @@ describe("Codex Daybreak options", () => {
         "gpt-6-sol",
       ),
     ).toBe(true);
-    expect(getCodexDaybreakModelSlugs([modelWithPrograms(["standard"])], selection)?.size).toBe(0);
-    expect(getCodexDaybreakModelSlugs([], selection)?.size).toBe(0);
+    expect(
+      getCodexDaybreakModelSlugs([modelWithPrograms(["standard"])], selection),
+    ).toBeUndefined();
+    expect(getCodexDaybreakModelSlugs([], selection)).toBeUndefined();
   });
 
   it("restores unfiltered models after a revoked program is turned off", () => {
     const models = [modelWithPrograms(["standard"])];
     const selection = [{ id: "cyberAccessProgram", value: "daybreakBlue" }];
-    expect(getCodexDaybreakModelSlugs(models, selection)?.size).toBe(0);
+    expect(getCodexDaybreakModelSlugs(models, selection)).toBeUndefined();
     expect(
       getCodexDaybreakModelSlugs(models, withCodexDaybreakSelection(selection, "standard")),
     ).toBeUndefined();
