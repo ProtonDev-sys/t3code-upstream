@@ -53,13 +53,10 @@ export function getCodexDaybreakModelSlugs(
 ): ReadonlySet<string> | undefined {
   const selectedProgram = selections?.find((option) => option.id === "cyberAccessProgram")?.value;
   if (selectedProgram !== "daybreakBlue" && selectedProgram !== "daybreakRed") return undefined;
-  const slugs = new Set(
-    models
-      .filter((model) => {
-        const state = getCodexDaybreakState([model], model.slug, selections);
-        return state.canEnable && state.program === selectedProgram;
-      })
-      .map((model) => model.slug),
-  );
+  const slugs = new Set<string>();
+  for (const model of models) {
+    const state = getCodexDaybreakState([model], model.slug, selections);
+    if (state.canEnable && state.program === selectedProgram) slugs.add(model.slug);
+  }
   return slugs.size > 0 ? slugs : undefined;
 }

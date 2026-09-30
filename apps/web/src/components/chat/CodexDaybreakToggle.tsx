@@ -63,7 +63,7 @@ export function CodexDaybreakToggle(props: {
       </TooltipTrigger>
       <TooltipPopup side="top">
         {modelDisabledReason ??
-          `Only models supporting Daybreak ${program === "daybreakRed" ? "Red" : "Blue"} for this Codex account are shown while enabled. Enabling selects ${model}. Approved access is required; some requests remain limited.`}
+          `Only models supporting ${label} for this Codex account are shown while enabled. Enabling selects ${model}. Approved access is required; some requests remain limited.`}
       </TooltipPopup>
     </Tooltip>
   );
