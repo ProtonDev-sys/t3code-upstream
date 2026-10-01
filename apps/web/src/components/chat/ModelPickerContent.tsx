@@ -1072,8 +1072,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       {props.modelOptionsControl?.(
         selectedEntry
           ? [selectedEntry]
-          : instanceEntries.filter((entry) =>
-              favorites.some((favorite) => favorite.provider === entry.instanceId),
+          : instanceEntries.filter(
+              (entry) =>
+                matchesLockedProvider(entry) &&
+                favorites.some((favorite) => favorite.provider === entry.instanceId),
             ),
       )}
     </TooltipProvider>

@@ -96,6 +96,18 @@ describe("Codex Daybreak options", () => {
     });
   });
 
+  it.each(["", "blue-only"])("prefers the saved tier over another model's tier (%s)", (model) => {
+    const models = [
+      modelWithPrograms(["standard", "daybreakBlue"], "blue-only"),
+      modelWithPrograms(["standard", "daybreakRed"], "red-only"),
+    ];
+    expect(
+      resolveCodexDaybreakModel(models, model, [
+        { id: "cyberAccessProgram", value: "daybreakRed" },
+      ]),
+    ).toEqual({ model: "red-only", enabled: true, program: "daybreakRed", canEnable: true });
+  });
+
   it("selects an advertised model instead of requesting Daybreak for a custom model", () => {
     const models = [modelWithPrograms(["standard", "daybreakBlue"])];
     expect(resolveCodexDaybreakModel(models, "gpt-6.1-sol", undefined)).toEqual({

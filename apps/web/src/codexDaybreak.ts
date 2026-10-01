@@ -38,13 +38,14 @@ export function resolveCodexDaybreakModel(
   model: string,
   selections: ReadonlyArray<ProviderOptionSelection> | undefined,
 ) {
-  const currentState = getCodexDaybreakState(models, model, selections);
-  if (currentState.canEnable) return { model, ...currentState };
+  let fallback = { model, ...getCodexDaybreakState(models, model, selections) };
+  if (fallback.canEnable && fallback.enabled) return fallback;
   for (const candidate of models) {
     const state = getCodexDaybreakState([candidate], candidate.slug, selections);
-    if (state.canEnable) return { model: candidate.slug, ...state };
+    if (state.canEnable && state.enabled) return { model: candidate.slug, ...state };
+    if (state.canEnable && !fallback.canEnable) fallback = { model: candidate.slug, ...state };
   }
-  return { model, ...currentState };
+  return fallback;
 }
 
 export function getCodexDaybreakModelSlugs(
