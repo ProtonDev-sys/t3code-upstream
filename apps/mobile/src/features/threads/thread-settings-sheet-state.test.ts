@@ -5,7 +5,6 @@ import { ProviderInstanceId, type ProviderOptionSelection } from "@t3tools/contr
 import type { ModelOption } from "../../lib/modelOptions";
 import {
   canCommitPendingModel,
-  daybreakPickerLabel,
   favoritesFirst,
   getModelDaybreakToggleState,
   modelFavoriteKey,
@@ -176,27 +175,6 @@ describe("thread settings sheet state", () => {
     expect(model.selection.options).toEqual([{ id: "reasoningEffort", value: "high" }]);
     expect(getModelDaybreakToggleState({ ...model, providerDriver: "claudeAgent" })).toBeNull();
     expect(getModelDaybreakToggleState({ ...model, isUnavailable: true })).toBeNull();
-    const red = {
-      ...model,
-      selection: {
-        ...model.selection,
-        options: [{ id: "cyberAccessProgram", value: "daybreakRed" }],
-      },
-      capabilities: {
-        optionDescriptors: [
-          {
-            id: "cyberAccessProgram",
-            label: "Daybreak",
-            type: "select" as const,
-            options: ["standard", "daybreakBlue", "daybreakRed"].map((id) => ({ id, label: id })),
-          },
-        ],
-      },
-    };
-    expect(daybreakPickerLabel([model])).toBe("Daybreak Blue");
-    expect(daybreakPickerLabel([red])).toBe("Daybreak Red");
-    expect(daybreakPickerLabel([model, red])).toBe("Daybreak");
-    expect(daybreakPickerLabel([])).toBeNull();
   });
 
   it("cannot save a staged model after sign-out removes it from the catalog", () => {

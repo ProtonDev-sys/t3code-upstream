@@ -52,8 +52,8 @@ describe("Daybreak picker mode", () => {
     expect(modelPickerDaybreakLabel(models, "favorites", favorites)).toBe("Daybreak Blue");
     expect(
       modelPickerDaybreakLabel(models, ProviderInstanceId.make("claude"), favorites),
-    ).toBeUndefined();
-    expect(modelPickerDaybreakLabel(models, "favorites", new Set())).toBeUndefined();
+    ).toBeNull();
+    expect(modelPickerDaybreakLabel(models, "favorites", new Set())).toBeNull();
     expect(
       modelPickerDaybreakLabel(
         [...models, { instanceId: luna.instanceId, slug: "sol", daybreakProgram: "daybreakRed" }],
@@ -61,6 +61,20 @@ describe("Daybreak picker mode", () => {
         favorites,
       ),
     ).toBe("Daybreak");
+    const otherAccount = [
+      ...models,
+      {
+        instanceId: ProviderInstanceId.make("codex_red"),
+        slug: "sol",
+        daybreakProgram: "daybreakRed",
+      },
+    ];
+    expect(modelPickerDaybreakLabel(otherAccount, luna.instanceId, favorites)).toBe(
+      "Daybreak Blue",
+    );
+    expect(modelPickerDaybreakLabel(otherAccount, luna.instanceId, favorites, true)).toBe(
+      "Daybreak",
+    );
   });
 
   it("sets the native program only in the chosen selection, retaining reasoning", () => {

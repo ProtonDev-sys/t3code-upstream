@@ -74,71 +74,40 @@ const ULTRATHINK_FRAME_CLASSES = {
 } as const;
 
 describe("getComposerProviderState", () => {
-  it("keeps Daybreak separate from the primary reasoning option", () => {
+  const daybreak = selectDescriptor("cyberAccessProgram", [
+    { id: "standard", label: "Off", isDefault: true },
+    { id: "daybreakBlue", label: "Blue" },
+  ]);
+  it.each([true, false])("preserves reasoning when Daybreak availability is %s", (available) => {
+    const options = selections(["cyberAccessProgram", "daybreakBlue"], ["reasoningEffort", "high"]);
     const state = getComposerProviderState({
       provider: CODEX,
       model: MODEL,
       models: modelWith([
-        selectDescriptor("cyberAccessProgram", [
-          { id: "standard", label: "Off", isDefault: true },
-          { id: "daybreakBlue", label: "Blue" },
-        ]),
+        ...(available ? [daybreak] : []),
         selectDescriptor("reasoningEffort", [{ id: "high", label: "High", isDefault: true }]),
       ]),
-      modelOptions: selections(["cyberAccessProgram", "daybreakBlue"]),
+      modelOptions: options,
       planModeEnabled: true,
     });
-
     expect(state.promptEffort).toBe("high");
-    expect(state.modelOptionsForDispatch).toEqual(
-      selections(["cyberAccessProgram", "daybreakBlue"]),
-    );
-  });
-
-  it("drops Daybreak when access is revoked without changing reasoning", () => {
-    const state = getComposerProviderState({
-      provider: CODEX,
-      model: MODEL,
-      models: modelWith([
-        selectDescriptor("reasoningEffort", [{ id: "high", label: "High", isDefault: true }]),
-      ]),
-      modelOptions: selections(["reasoningEffort", "high"], ["cyberAccessProgram", "daybreakBlue"]),
-      planModeEnabled: true,
-    });
-
-    expect(state.promptEffort).toBe("high");
-    expect(state.modelOptionsForDispatch).toEqual(selections(["reasoningEffort", "high"]));
+    expect(state.modelOptionsForDispatch).toEqual(available ? options : options.slice(1));
   });
 
   it.each([false, true])(
-    "does not treat Codex service tier as reasoning with Daybreak %s",
-    (daybreak) => {
-      const descriptors = [
-        selectDescriptor("serviceTier", [
-          { id: "default", label: "Standard", isDefault: true },
-          { id: "priority", label: "Fast" },
-        ]),
-        ...(daybreak
-          ? [
-              selectDescriptor("cyberAccessProgram", [
-                { id: "standard", label: "Off", isDefault: true },
-                { id: "daybreakBlue", label: "Blue" },
-              ]),
-            ]
-          : []),
-      ];
-      const options = selections(
-        ["serviceTier", "priority"],
-        ...(daybreak ? [["cyberAccessProgram", "daybreakBlue"] as [string, string]] : []),
-      );
+    "does not treat service tier as reasoning with Daybreak %s",
+    (available) => {
+      const options = selections(["serviceTier", "priority"]);
       const state = getComposerProviderState({
         provider: CODEX,
         model: MODEL,
-        models: modelWith(descriptors),
+        models: modelWith([
+          selectDescriptor("serviceTier", [{ id: "priority", label: "Fast" }]),
+          ...(available ? [daybreak] : []),
+        ]),
         modelOptions: options,
         planModeEnabled: true,
       });
-
       expect(state.promptEffort).toBeNull();
       expect(state.modelOptionsForDispatch).toEqual(options);
     },

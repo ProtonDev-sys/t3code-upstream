@@ -17,7 +17,8 @@ import {
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,
-  getCodexDaybreakToggleState,
+  getCodexDaybreakState,
+  getCodexDaybreakLabel,
   readCustomModelEntries,
   toCustomModelSetting,
   getProviderOptionBooleanSelectionValue,
@@ -29,7 +30,15 @@ import {
 
 describe("Daybreak toggle state", () => {
   it("requires an advertised program and standard treatment", () => {
-    expect(getCodexDaybreakToggleState([])).toBeNull();
+    expect(getCodexDaybreakState([])).toBeNull();
+  });
+  it.each([
+    [[], null],
+    [[undefined, "daybreakBlue"], "Daybreak Blue"],
+    [["daybreakRed"], "Daybreak Red"],
+    [["daybreakBlue", "daybreakRed"], "Daybreak"],
+  ])("labels the available programs %j", (programs, label) => {
+    expect(getCodexDaybreakLabel(programs)).toBe(label);
   });
   it.each([
     [[], "standard", null],
@@ -44,7 +53,7 @@ describe("Daybreak toggle state", () => {
     [["standard", "daybreakRed"], "standard", { checked: false, enabledValue: "daybreakRed" }],
     [["standard", "daybreakRed"], "daybreakBlue", { checked: false, enabledValue: "daybreakRed" }],
   ])("resolves advertised %j with saved %s", (programs, currentValue, expected) => {
-    const descriptors: ReadonlyArray<ProviderOptionDescriptor> = [
+    const descriptors = [
       {
         id: "cyberAccessProgram",
         label: "Daybreak",
@@ -52,8 +61,11 @@ describe("Daybreak toggle state", () => {
         options: programs.map((id) => ({ id, label: id })),
         currentValue,
       },
-    ];
-    expect(getCodexDaybreakToggleState(descriptors)).toEqual(expected);
+    ] satisfies ReadonlyArray<ProviderOptionDescriptor>;
+    expect(getCodexDaybreakState(descriptors)).toEqual(expected);
+    expect(
+      getCodexDaybreakState([{ ...descriptors[0]!, currentValue: "daybreakBlue" }], currentValue),
+    ).toEqual(expected);
   });
 });
 

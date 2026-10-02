@@ -31,7 +31,11 @@ import {
 import { SKILL_MENTION_PATTERN } from "@t3tools/shared/composerInlineTokens";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import { computerUseToolTitle } from "@t3tools/shared/toolActivity";
-import { getModelSelectionStringOptionValue, modelSelectionsEqual } from "@t3tools/shared/model";
+import {
+  getCodexDaybreakState,
+  getModelSelectionStringOptionValue,
+  modelSelectionsEqual,
+} from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import type {
   ChatAttachment,
@@ -635,7 +639,6 @@ const decodeTurnSandboxPolicy = Schema.decodeUnknownEffect(
 const decodeTurnReasoningEffort = Schema.decodeUnknownEffect(
   Schema.Union([CodexSchema.V2TurnStartParams__ReasoningEffort, Schema.Null]),
 );
-const isCodexCyberAccessProgram = Schema.is(CodexSchema.V2TurnStartParams__CyberAccessProgram);
 
 const CodexTurnStartParamsWithCollaborationMode = CodexSchema.V2TurnStartParams.pipe(
   Schema.fieldsAssign({
@@ -5547,27 +5550,17 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
               const mcpSession = McpProviderSession.readMcpProviderSession(turnInput.threadId);
               const models =
                 adapterOptions.models === undefined ? [] : yield* adapterOptions.models;
-              const cyberDescriptor = models
-                .find((model) => model.slug === turnInput.modelSelection.model)
-                ?.capabilities?.optionDescriptors?.find(
-                  (descriptor) =>
-                    descriptor.id === "cyberAccessProgram" && descriptor.type === "select",
-                );
-              const selectedCyberProgram = getModelSelectionStringOptionValue(
-                turnInput.modelSelection,
-                "cyberAccessProgram",
+              const selection = turnInput.modelSelection;
+              const daybreak = getCodexDaybreakState(
+                models.find((model) => model.slug === selection.model)?.capabilities
+                  ?.optionDescriptors,
+                getModelSelectionStringOptionValue(selection, "cyberAccessProgram") ?? "standard",
               );
               // Displayed Off must request standard; omission lets Codex choose automatically.
               const cyberAccessProgram =
-                turnInput.modelSelection.instanceId === adapterOptions.instanceId &&
-                cyberDescriptor?.type === "select" &&
-                cyberDescriptor.options.some((option) => option.id === "standard") &&
-                cyberDescriptor.options.some(
-                  (option) => option.id === "daybreakBlue" || option.id === "daybreakRed",
-                )
-                  ? isCodexCyberAccessProgram(selectedCyberProgram) &&
-                    cyberDescriptor.options.some((option) => option.id === selectedCyberProgram)
-                    ? selectedCyberProgram
+                selection.instanceId === adapterOptions.instanceId && daybreak
+                  ? daybreak.checked
+                    ? daybreak.enabledValue
                     : "standard"
                   : undefined;
               const turnStartParams = yield* buildCodexTurnStartParams({

@@ -7,9 +7,11 @@ import {
 } from "@t3tools/contracts";
 import {
   createModelSelection,
-  getCodexDaybreakToggleState,
-  getProviderOptionDescriptors,
+  getCodexDaybreakLabel,
+  getCodexDaybreakState,
+  getModelSelectionStringOptionValue,
   resolveSelectableModel,
+  withCodexDaybreakProgram,
 } from "@t3tools/shared/model";
 import { useAtomValue } from "@effect/atom-react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
@@ -76,19 +78,17 @@ export function modelPickerDaybreakLabel(
   models: ReadonlyArray<Pick<ModelPickerItem, "instanceId" | "slug" | "daybreakProgram">>,
   selectedInstanceId: ProviderInstanceId | "favorites",
   favorites: ReadonlySet<string>,
+  searching = false,
 ) {
-  const eligible = models.filter(
-    (model) =>
-      model.daybreakProgram &&
-      (selectedInstanceId === "favorites"
-        ? favorites.has(providerModelKey(model.instanceId, model.slug))
-        : model.instanceId === selectedInstanceId),
+  const contextual = models.filter((model) =>
+    selectedInstanceId === "favorites"
+      ? favorites.has(providerModelKey(model.instanceId, model.slug))
+      : model.instanceId === selectedInstanceId,
   );
-  if (!eligible.length) return undefined;
-  const program = eligible[0]?.daybreakProgram;
-  return eligible.every((model) => model.daybreakProgram === program)
-    ? `Daybreak ${program === "daybreakBlue" ? "Blue" : "Red"}`
-    : "Daybreak";
+  if (!contextual.some((model) => model.daybreakProgram)) return null;
+  return getCodexDaybreakLabel(
+    (searching ? models : contextual).map((model) => model.daybreakProgram),
+  );
 }
 
 /** Attach the picker mode only when a model is chosen; toggling the mode never edits a selection. */
@@ -97,23 +97,18 @@ export function modelPickerSelection(
   current: ModelSelection | null | undefined,
   daybreakEnabled: boolean | undefined,
 ) {
-  const options =
+  const selection =
     current?.instanceId === target.instanceId && current.model === target.model
-      ? current.options
-      : undefined;
+      ? current
+      : createModelSelection(target.instanceId, target.model);
   if (daybreakEnabled && !target.daybreakProgram) return null;
-  return createModelSelection(
-    target.instanceId,
-    target.model,
+  return withCodexDaybreakProgram(
+    selection,
     target.daybreakProgram && daybreakEnabled !== undefined
-      ? [
-          ...(options ?? []).filter((option) => option.id !== "cyberAccessProgram"),
-          {
-            id: "cyberAccessProgram",
-            value: daybreakEnabled ? target.daybreakProgram : "standard",
-          },
-        ]
-      : options,
+      ? daybreakEnabled
+        ? target.daybreakProgram
+        : "standard"
+      : undefined,
   );
 }
 
@@ -375,19 +370,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     [instanceEntries],
   );
   const daybreakByModel = useMemo(() => {
-    const states = new Map<string, NonNullable<ReturnType<typeof getCodexDaybreakToggleState>>>();
+    const states = new Map<string, NonNullable<ReturnType<typeof getCodexDaybreakState>>>();
     for (const entry of instanceEntries) {
       if (entry.driverKind !== "codex") continue;
       for (const model of entry.models) {
-        const state = getCodexDaybreakToggleState(
-          getProviderOptionDescriptors({
-            caps: model.capabilities ?? {},
-            selections:
-              props.modelSelection?.instanceId === entry.instanceId &&
-              props.modelSelection.model === model.slug
-                ? props.modelSelection.options
-                : undefined,
-          }),
+        const state = getCodexDaybreakState(
+          model.capabilities?.optionDescriptors,
+          props.modelSelection?.instanceId === entry.instanceId &&
+            props.modelSelection.model === model.slug
+            ? getModelSelectionStringOptionValue(props.modelSelection, "cyberAccessProgram")
+            : undefined,
         );
         if (state) states.set(modelPickerModelKey(entry.instanceId, model.slug), state);
       }
@@ -464,8 +456,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           ...(model.isUnavailable ? { isUnavailable: true } : {}),
           instanceId,
           driverKind: entry.driverKind,
-          daybreakProgram: daybreakByModel.get(modelPickerModelKey(instanceId, model.slug))
-            ?.enabledValue,
+          daybreakProgram: model.isUnavailable
+            ? undefined
+            : daybreakByModel.get(modelPickerModelKey(instanceId, model.slug))?.enabledValue,
           instanceDisplayName: entry.displayName,
           ...(entry.accentColor ? { instanceAccentColor: entry.accentColor } : {}),
           ...(entry.acpRegistryAgentId ? { acpRegistryAgentId: entry.acpRegistryAgentId } : {}),
@@ -486,13 +479,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   ]);
   const daybreakLabel =
     props.modelSelection === undefined
-      ? undefined
+      ? null
       : modelPickerDaybreakLabel(
           flatModels.filter(matchesLockedProvider),
           selectedInstanceId,
           favoritesSet,
+          searchQuery.trim().length > 0,
         );
-  const filterDaybreak = daybreakMode && daybreakLabel !== undefined;
+  const filterDaybreak = daybreakMode && daybreakLabel !== null;
 
   const isLocked = props.lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;
@@ -844,8 +838,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return mapping.size > 0 ? mapping : EMPTY_MODEL_JUMP_LABELS;
   }, [keybindings, modelJumpCommandByKey, modelJumpShortcutContext]);
   const modelListExtraData = useMemo(
-    () => ({ favoritesSet, modelJumpLabelByKey, activeModelKey, selectedModelKeySet }),
-    [favoritesSet, modelJumpLabelByKey, activeModelKey, selectedModelKeySet],
+    () => ({
+      favoritesSet,
+      modelJumpLabelByKey,
+      activeModelKey,
+      selectedModelKeySet,
+      legacySection,
+    }),
+    [favoritesSet, modelJumpLabelByKey, activeModelKey, selectedModelKeySet, legacySection],
   );
 
   useEffect(() => {
@@ -1073,7 +1073,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                           <div className="min-w-0 flex-1 text-left">
                             <div className="text-xs font-medium leading-snug">Legacy models</div>
                             <div className="mt-1 text-xs font-normal leading-snug text-muted-foreground/70">
-                              {legacySection.legacyModels.length} models
+                              {legacySection.legacyModels.length}{" "}
+                              {legacySection.legacyModels.length === 1 ? "model" : "models"}
                             </div>
                           </div>
                           <ChevronRightIcon

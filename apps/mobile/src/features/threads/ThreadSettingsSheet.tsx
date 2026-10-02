@@ -10,7 +10,8 @@ import type { LegendListRenderItemProps } from "@legendapp/list/react-native";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import {
-  getCodexDaybreakToggleState,
+  getCodexDaybreakState,
+  getCodexDaybreakLabel,
   getProviderOptionCurrentLabel,
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
@@ -89,7 +90,6 @@ import {
 } from "./thread-settings-options";
 import {
   canCommitPendingModel,
-  daybreakPickerLabel,
   favoritesFirst,
   getModelDaybreakToggleState,
   modelFavoriteKey,
@@ -367,7 +367,7 @@ function ThreadSettingsSessionProvider(
   const [showLegacyToggle, setShowLegacyToggle] = useState(false);
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
   const [daybreakEnabled, setDaybreakEnabled] = useState(
-    () => getCodexDaybreakToggleState(props.optionDescriptors)?.checked ?? false,
+    () => getCodexDaybreakState(props.optionDescriptors)?.checked ?? false,
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [providerExpansionOverrides, setProviderExpansionOverrides] = useState<ReadonlySet<string>>(
@@ -382,7 +382,7 @@ function ThreadSettingsSessionProvider(
   );
   const daybreak = useMemo(
     () =>
-      daybreakPickerLabel(
+      getCodexDaybreakLabel(
         props.providerGroups
           .flatMap((group) => group.models)
           .filter((option) =>
@@ -390,12 +390,15 @@ function ThreadSettingsSessionProvider(
               ? favoriteKeys.has(option.key)
               : option.providerKey === providerFilter,
           )
-          .map((option) =>
-            pendingModel?.key === option.key
-              ? pendingModel
-              : isApplied(option)
-                ? option
-                : { ...option, selection: withRememberedModelOptions(option.selection) },
+          .map(
+            (option) =>
+              getModelDaybreakToggleState(
+                pendingModel?.key === option.key
+                  ? pendingModel
+                  : isApplied(option)
+                    ? option
+                    : { ...option, selection: withRememberedModelOptions(option.selection) },
+              )?.enabledValue,
           ),
       ),
     [favoriteKeys, isApplied, pendingModel, props.providerGroups, providerFilter],

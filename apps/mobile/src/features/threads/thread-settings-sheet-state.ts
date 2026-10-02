@@ -1,6 +1,10 @@
 import type { ModelOption, ProviderGroup } from "../../lib/modelOptions";
 import type { ProviderInstanceId } from "@t3tools/contracts";
-import { getCodexDaybreakToggleState, getProviderOptionDescriptors } from "@t3tools/shared/model";
+import {
+  getCodexDaybreakState,
+  getModelSelectionStringOptionValue,
+  withCodexDaybreakProgram,
+} from "@t3tools/shared/model";
 
 export type ModelFavorite = {
   readonly provider: ProviderInstanceId;
@@ -70,47 +74,21 @@ export function pendingModelAfterPress(input: {
   return daybreak
     ? {
         ...pressed,
-        selection: {
-          ...pressed.selection,
-          options: [
-            ...(pressed.selection.options ?? []).filter(
-              (option) => option.id !== "cyberAccessProgram",
-            ),
-            {
-              id: "cyberAccessProgram",
-              value: input.daybreakEnabled ? daybreak.enabledValue : "standard",
-            },
-          ],
-        },
+        selection: withCodexDaybreakProgram(
+          pressed.selection,
+          input.daybreakEnabled ? daybreak.enabledValue : "standard",
+        ),
       }
     : pressed;
 }
 
 export function getModelDaybreakToggleState(model: ModelOption) {
   return model.providerDriver === "codex" && !model.isUnavailable && model.capabilities
-    ? getCodexDaybreakToggleState(
-        getProviderOptionDescriptors({
-          caps: model.capabilities,
-          selections: model.selection.options,
-        }),
+    ? getCodexDaybreakState(
+        model.capabilities.optionDescriptors,
+        getModelSelectionStringOptionValue(model.selection, "cyberAccessProgram"),
       )
     : null;
-}
-
-export function daybreakPickerLabel(models: ReadonlyArray<ModelOption>) {
-  const programs = new Set(
-    models.flatMap((model) => {
-      const state = getModelDaybreakToggleState(model);
-      return state ? [state.enabledValue] : [];
-    }),
-  );
-  return programs.size === 0
-    ? null
-    : programs.size > 1
-      ? "Daybreak"
-      : programs.has("daybreakBlue")
-        ? "Daybreak Blue"
-        : "Daybreak Red";
 }
 
 /** A model can disappear while the picker is open. */
