@@ -10,6 +10,7 @@ import type { LegendListRenderItemProps } from "@legendapp/list/react-native";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import {
+  getCodexDaybreakToggleState,
   getProviderOptionCurrentLabel,
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
@@ -711,6 +712,7 @@ function ThreadSettingsOptionsItem(props: {
 }) {
   const insets = useSafeAreaInsets();
   const session = useThreadSettingsSession();
+  const daybreak = getCodexDaybreakToggleState(session.displayedDescriptors);
   const configs = useAtomValue(environmentServerConfigsAtom);
   const selectedProvider = session.environmentId
     ? (configs
@@ -731,6 +733,30 @@ function ThreadSettingsOptionsItem(props: {
         layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}
       >
         {session.displayedDescriptors.map((descriptor) => {
+          if (descriptor.id === "cyberAccessProgram") {
+            if (!daybreak) return null;
+            return (
+              <Animated.View
+                key={descriptor.id}
+                entering={
+                  props.animationsReady ? THREAD_SETTINGS_OPTION_ENTER_TRANSITION : undefined
+                }
+                exiting={props.animationsReady ? THREAD_SETTINGS_OPTION_EXIT_TRANSITION : undefined}
+                layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}
+              >
+                <SwitchRow
+                  label={descriptor.label}
+                  value={daybreak.checked}
+                  onValueChange={(value) =>
+                    session.applyOptionChange(
+                      descriptor.id,
+                      value ? daybreak.enabledValue : "standard",
+                    )
+                  }
+                />
+              </Animated.View>
+            );
+          }
           if (descriptor.type === "select") {
             return (
               <Animated.View

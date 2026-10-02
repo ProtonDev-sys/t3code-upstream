@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ProviderDriverKind, ProviderInstanceId, type ModelCapabilities } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ModelCapabilities,
+  type ProviderOptionDescriptor,
+} from "@t3tools/contracts";
 
 import {
   applyClaudePromptEffortPrefix,
@@ -12,6 +17,7 @@ import {
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,
+  getCodexDaybreakToggleState,
   readCustomModelEntries,
   toCustomModelSetting,
   getProviderOptionBooleanSelectionValue,
@@ -20,6 +26,70 @@ import {
   normalizeModelSlug,
   modelSelectionsEqual,
 } from "./model.ts";
+
+describe("Daybreak toggle state", () => {
+  function descriptors(programs: ReadonlyArray<string>, currentValue = "standard") {
+    return [
+      {
+        id: "cyberAccessProgram",
+        label: "Daybreak",
+        type: "select",
+        options: [
+          { id: "standard", label: "Off", isDefault: true },
+          ...programs.map((id) => ({ id, label: id })),
+        ],
+        currentValue,
+      },
+    ] satisfies ReadonlyArray<ProviderOptionDescriptor>;
+  }
+
+  it("hides the switch when the selected model has no advertised Daybreak program", () => {
+    expect(getCodexDaybreakToggleState([])).toBeNull();
+    expect(getCodexDaybreakToggleState(descriptors([]))).toBeNull();
+  });
+
+  it("hides a malformed descriptor without a selectable Off choice", () => {
+    const [descriptor] = descriptors(["daybreakBlue"]);
+    expect(
+      getCodexDaybreakToggleState([
+        { ...descriptor, options: descriptor.options.filter((option) => option.id !== "standard") },
+      ]),
+    ).toBeNull();
+  });
+
+  it("prefers Blue for an off selection when both programs are advertised", () => {
+    expect(getCodexDaybreakToggleState(descriptors(["daybreakRed", "daybreakBlue"]))).toEqual({
+      checked: false,
+      enabledValue: "daybreakBlue",
+    });
+  });
+
+  it.each(["daybreakBlue", "daybreakRed"])(
+    "preserves the active advertised %s program",
+    (program) => {
+      expect(
+        getCodexDaybreakToggleState(descriptors(["daybreakBlue", "daybreakRed"], program)),
+      ).toEqual({
+        checked: true,
+        enabledValue: program,
+      });
+    },
+  );
+
+  it("uses Red when it is the selected model's only program", () => {
+    expect(getCodexDaybreakToggleState(descriptors(["daybreakRed"]))).toEqual({
+      checked: false,
+      enabledValue: "daybreakRed",
+    });
+  });
+
+  it("does not mark a revoked saved program as enabled", () => {
+    expect(getCodexDaybreakToggleState(descriptors(["daybreakRed"], "daybreakBlue"))).toEqual({
+      checked: false,
+      enabledValue: "daybreakRed",
+    });
+  });
+});
 
 it("keeps the Codex catalog display formatting", () => {
   expect(formatCodexModelName("gpt-5.3-codex-spark")).toBe("GPT-5.3-Codex-Spark");

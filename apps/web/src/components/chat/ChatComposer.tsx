@@ -1951,6 +1951,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           })
       : null);
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+  const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
   const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
   const addComposerDraftFiles = useComposerDraftStore((store) => store.addFiles);
@@ -2847,6 +2848,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   // Provider traits UI
   // ------------------------------------------------------------------
+  const updateComposerProviderOptions = useCallback(
+    (options: ModelSelection["options"]) => {
+      setProviderModelOptions(composerDraftTarget, selectedProvider, options, {
+        instanceId: selectedInstanceId,
+        model: selectedModel,
+        persistSticky: true,
+      });
+    },
+    [
+      composerDraftTarget,
+      selectedProvider,
+      selectedInstanceId,
+      selectedModel,
+      setProviderModelOptions,
+    ],
+  );
   const setPromptFromTraits = useCallback(
     (nextPrompt: string) => {
       if (nextPrompt === promptRef.current) {
@@ -5360,6 +5377,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         compact={false}
         isComposerOwned
         disabled={providerCatalogPending || isSendBusy}
+        providerOptions={composerModelOptions?.[selectedInstanceId]}
+        onProviderOptionsChange={updateComposerProviderOptions}
         {...(routeKind === "draft" && supportsMultipleModels
           ? {
               ...(multipleModelSelections !== null

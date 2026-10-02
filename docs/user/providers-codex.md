@@ -27,10 +27,9 @@ covers installation and custom configuration.
 
 ## Use Daybreak
 
-For an account and model with approved Daybreak access, choose **Daybreak** in
-the thread's model options alongside reasoning and service tier. Select Blue or
-Red from the programs available to that account, or Off to return to standard
-treatment. On mobile, use the thread settings' model options.
+For an account and model with approved Daybreak access, turn on **Daybreak** in
+the model selector. Turn it off to return to standard treatment. On mobile, use
+the Daybreak toggle in the thread settings' model section.
 
 The choice applies to subsequent turns and is saved with that account and model's
 options. Switching models restores the destination model's saved options.

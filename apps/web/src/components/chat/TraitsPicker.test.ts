@@ -85,24 +85,24 @@ describe("buildTraitsTriggerDisplay", () => {
     });
   });
 
-  it("keeps a Daybreak-only trigger readable while off", () => {
+  it("leaves Daybreak to the model selector when it is the only option", () => {
     expect(display([daybreakDescriptor("standard")])).toEqual({
-      label: "Daybreak",
+      label: "",
       speedIcon: null,
     });
   });
 
-  it.each([
-    ["daybreakBlue", "Daybreak Blue"],
-    ["daybreakRed", "Daybreak Red"],
-  ] as const)("labels active %s separately from reasoning and speed", (program, label) => {
-    expect(
-      display([EFFORT, serviceTierDescriptor("priority"), daybreakDescriptor(program)]),
-    ).toEqual({
-      label: `High · ${label}`,
-      speedIcon: "fast",
-    });
-  });
+  it.each(["daybreakBlue", "daybreakRed"] as const)(
+    "omits active %s from the reasoning trigger",
+    (program) => {
+      expect(
+        display([EFFORT, serviceTierDescriptor("priority"), daybreakDescriptor(program)]),
+      ).toEqual({
+        label: "High",
+        speedIcon: "fast",
+      });
+    },
+  );
 
   it("omits fast mode from the label entirely when it is off", () => {
     expect(display([EFFORT, fastModeDescriptor(false), CONTEXT_WINDOW])).toEqual({
@@ -243,7 +243,7 @@ describe("buildTraitsTriggerDisplay", () => {
 });
 
 describe("shouldRenderTraitsControls", () => {
-  it("keeps Daybreak selectable when the model advertises no reasoning choices", () => {
+  it("does not show a reasoning menu for a model with only Daybreak choices", () => {
     expect(
       shouldRenderTraitsControls({
         provider: CODEX,
@@ -260,7 +260,7 @@ describe("shouldRenderTraitsControls", () => {
         modelOptions: undefined,
         planModeEnabled: true,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 });
 

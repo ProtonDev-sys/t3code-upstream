@@ -14,6 +14,7 @@ import {
   EnvironmentId,
   MessageId,
   type ModelSelection,
+  type ModelCapabilities,
   NodeId,
   type OrchestrationV2AppThread,
   type OrchestrationV2ProviderThread,
@@ -78,6 +79,20 @@ const replayTranscriptJson = Schema.fromJsonString(CodexReplay.CodexAppServerRep
 const encodeReplayTranscriptJson = Schema.encodeEffect(replayTranscriptJson);
 const decodeReplayTranscriptJson = Schema.decodeUnknownEffect(replayTranscriptJson);
 const encodeStringJson = Schema.encodeEffect(Schema.fromJsonString(Schema.String));
+
+function codexDaybreakTestCapabilities(programs: ReadonlyArray<string>): ModelCapabilities {
+  return {
+    optionDescriptors: [
+      {
+        id: "cyberAccessProgram",
+        label: "Daybreak",
+        type: "select",
+        options: programs.map((id) => ({ id, label: id })),
+        currentValue: "standard",
+      },
+    ],
+  };
+}
 
 describe("Codex context usage compatibility", () => {
   const previous: ModelSelection = {
@@ -400,6 +415,58 @@ describe("CodexAdapterV2 assistant message streaming", () => {
 });
 
 describe("CodexAdapterV2 runtime policy", () => {
+  it.effect("requests standard for the advertised Off default and rejected saved programs", () =>
+    Effect.gen(function* () {
+      const instanceId = ProviderInstanceId.make("codex");
+      for (const options of [
+        undefined,
+        [{ id: "cyberAccessProgram", value: "invalid" }],
+        [{ id: "cyberAccessProgram", value: "daybreakRed" }],
+      ]) {
+        const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+          nativeThreadId: "native-daybreak-default",
+          codexInput: [{ type: "text", text: "test" }],
+          runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: null },
+          providerInstanceId: instanceId,
+          modelCapabilities: codexDaybreakTestCapabilities(["standard", "daybreakBlue"]),
+          modelSelection: {
+            instanceId,
+            model: "gpt-6-sol",
+            ...(options === undefined ? {} : { options }),
+          },
+        });
+        assert.equal(params.cyberAccessProgram, "standard");
+      }
+    }),
+  );
+
+  it.effect("omits cyber treatment for models without advertised Daybreak access", () =>
+    Effect.gen(function* () {
+      const instanceId = ProviderInstanceId.make("codex");
+      for (const modelCapabilities of [
+        null,
+        { optionDescriptors: [] },
+        codexDaybreakTestCapabilities(["standard"]),
+      ]) {
+        for (const program of ["standard", "daybreakBlue", "daybreakRed"]) {
+          const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+            nativeThreadId: "native-daybreak-unavailable",
+            codexInput: [{ type: "text", text: "test" }],
+            runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: null },
+            providerInstanceId: instanceId,
+            modelCapabilities,
+            modelSelection: {
+              instanceId,
+              model: "gpt-6-sol",
+              options: [{ id: "cyberAccessProgram", value: program }],
+            },
+          });
+          assert.notProperty(params, "cyberAccessProgram");
+        }
+      }
+    }),
+  );
+
   it.effect("forwards explicit Daybreak and off choices alongside other model options", () =>
     Effect.gen(function* () {
       const instanceId = ProviderInstanceId.make("codex-secondary");
@@ -1682,6 +1749,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     onEvent: (event: ProviderAdapterV2Event) => Effect.Effect<unknown> = () => Effect.void,
     onRequest: (method: string, params: unknown) => Effect.Effect<void> = () => Effect.void,
     readChildMetadata?: (threadId: string) => Effect.Effect<unknown>,
+    models?: CodexAdapterV2.CodexAdapterV2Options["models"],
   ) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -1727,6 +1795,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         fileSystem,
         idAllocator,
         serverConfig,
+        ...(models === undefined ? {} : { models }),
         continuationRequests: {
           offer: (request) =>
             Effect.sync(() => {
@@ -1790,9 +1859,15 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       };
     });
 
-  for (const account of ["bound", "other"] as const) {
+  for (const [account, selectionMode] of [
+    ["bound", "explicit"],
+    ["other", "explicit"],
+    ["bound", "default"],
+    ["bound", "revoked"],
+    ["bound", "removed"],
+  ] as const) {
     it.effect(
-      `uses the ${account} account's Daybreak choice on turns before and after resume`,
+      `uses the ${account} account's ${selectionMode} Daybreak choice before and after resume`,
       () =>
         Effect.scoped(
           Effect.gen(function* () {
@@ -1807,7 +1882,17 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               options: [
                 { id: "reasoningEffort", value: "high" },
                 { id: "serviceTier", value: "priority" },
-                { id: "cyberAccessProgram", value: program },
+                ...(selectionMode === "default"
+                  ? []
+                  : [
+                      {
+                        id: "cyberAccessProgram",
+                        value:
+                          selectionMode === "revoked" || selectionMode === "removed"
+                            ? "daybreakBlue"
+                            : program,
+                      },
+                    ]),
               ],
             });
             const turnEntries = (
@@ -1832,7 +1917,12 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                     approvalsReviewer: "user",
                     sandboxPolicy: { type: "dangerFullAccess" },
                     summary: "detailed",
-                    ...(account === "bound" ? { cyberAccessProgram: program } : {}),
+                    ...(account === "bound" &&
+                    !(selectionMode === "removed" && program === "standard")
+                      ? {
+                          cyberAccessProgram: selectionMode === "default" ? "standard" : program,
+                        }
+                      : {}),
                   },
                 },
               },
@@ -1892,11 +1982,24 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               ],
             });
             const bothTerminal = yield* Deferred.make<void>();
+            const catalog = yield* Ref.make([
+              {
+                slug: "gpt-6-sol",
+                name: "Sol",
+                isCustom: false,
+                capabilities: codexDaybreakTestCapabilities(["standard", "daybreakBlue"]),
+              },
+            ]);
             let terminalCount = 0;
-            const harness = yield* makeCodexReplayHarness(transcript, (event) =>
-              event.type === "turn.terminal" && ++terminalCount === 2
-                ? Deferred.succeed(bothTerminal, undefined)
-                : Effect.void,
+            const harness = yield* makeCodexReplayHarness(
+              transcript,
+              (event) =>
+                event.type === "turn.terminal" && ++terminalCount === 2
+                  ? Deferred.succeed(bothTerminal, undefined)
+                  : Effect.void,
+              undefined,
+              undefined,
+              Ref.get(catalog),
             );
             yield* harness.runtime.startTurn({
               ...makeCodexTestTurnInput({
@@ -1909,6 +2012,16 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               modelSelection: modelSelection("daybreakBlue"),
             });
             yield* harness.firstTerminal;
+            if (selectionMode === "revoked" || selectionMode === "removed") {
+              yield* Ref.update(catalog, (models) =>
+                models.map((model) => ({
+                  ...model,
+                  capabilities: codexDaybreakTestCapabilities(
+                    selectionMode === "revoked" ? ["standard", "daybreakRed"] : ["standard"],
+                  ),
+                })),
+              );
+            }
             const resumedThread = yield* harness.runtime.resumeThread({
               providerThread: harness.providerThread,
               modelSelection: modelSelection("standard"),

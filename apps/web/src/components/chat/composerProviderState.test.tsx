@@ -19,7 +19,8 @@ import {
 // optionDescriptors, so these tests use a single synthetic provider/model and
 // vary only the descriptor shape per scenario.
 
-const PROVIDER: ProviderDriverKind = ProviderDriverKind.make("codex");
+const PROVIDER = ProviderDriverKind.make("claudeAgent");
+const CODEX = ProviderDriverKind.make("codex");
 const MODEL = "test-model";
 
 function selectDescriptor(
@@ -75,7 +76,7 @@ const ULTRATHINK_FRAME_CLASSES = {
 describe("getComposerProviderState", () => {
   it("keeps Daybreak separate from the primary reasoning option", () => {
     const state = getComposerProviderState({
-      provider: PROVIDER,
+      provider: CODEX,
       model: MODEL,
       models: modelWith([
         selectDescriptor("cyberAccessProgram", [
@@ -96,7 +97,7 @@ describe("getComposerProviderState", () => {
 
   it("does not use Daybreak as prompt effort when reasoning choices are absent", () => {
     const state = getComposerProviderState({
-      provider: PROVIDER,
+      provider: CODEX,
       model: MODEL,
       models: modelWith([
         selectDescriptor("cyberAccessProgram", [
@@ -116,7 +117,7 @@ describe("getComposerProviderState", () => {
 
   it("turns off a saved Daybreak program when the model stops advertising it", () => {
     const state = getComposerProviderState({
-      provider: PROVIDER,
+      provider: CODEX,
       model: MODEL,
       models: modelWith([
         selectDescriptor("cyberAccessProgram", [
@@ -133,7 +134,7 @@ describe("getComposerProviderState", () => {
 
   it("drops Daybreak when access is revoked without changing reasoning", () => {
     const state = getComposerProviderState({
-      provider: PROVIDER,
+      provider: CODEX,
       model: MODEL,
       models: modelWith([
         selectDescriptor("reasoningEffort", [{ id: "high", label: "High", isDefault: true }]),
@@ -145,6 +146,40 @@ describe("getComposerProviderState", () => {
     expect(state.promptEffort).toBe("high");
     expect(state.modelOptionsForDispatch).toEqual(selections(["reasoningEffort", "high"]));
   });
+
+  it.each([false, true])(
+    "does not treat Codex service tier as reasoning with Daybreak %s",
+    (daybreak) => {
+      const descriptors = [
+        selectDescriptor("serviceTier", [
+          { id: "default", label: "Standard", isDefault: true },
+          { id: "priority", label: "Fast" },
+        ]),
+        ...(daybreak
+          ? [
+              selectDescriptor("cyberAccessProgram", [
+                { id: "standard", label: "Off", isDefault: true },
+                { id: "daybreakBlue", label: "Blue" },
+              ]),
+            ]
+          : []),
+      ];
+      const options = selections(
+        ["serviceTier", "priority"],
+        ...(daybreak ? [["cyberAccessProgram", "daybreakBlue"] as [string, string]] : []),
+      );
+      const state = getComposerProviderState({
+        provider: CODEX,
+        model: MODEL,
+        models: modelWith(descriptors),
+        modelOptions: options,
+        planModeEnabled: true,
+      });
+
+      expect(state.promptEffort).toBeNull();
+      expect(state.modelOptionsForDispatch).toEqual(options);
+    },
+  );
 
   it("derives a stable prompt injection state for ordinary prompt edits", () => {
     expect(getComposerPromptInjectionState("Investigate this failure")).toBe("none");

@@ -237,6 +237,25 @@ export function getProviderOptionCurrentLabel(
   return descriptor.options.find((option) => option.id === currentValue)?.label;
 }
 
+/** Resolve Daybreak's switch from the selected account and model's advertised choices. */
+export function getCodexDaybreakToggleState(descriptors: ReadonlyArray<ProviderOptionDescriptor>) {
+  const descriptor = descriptors.find(
+    (candidate): candidate is Extract<ProviderOptionDescriptor, { type: "select" }> =>
+      candidate.id === "cyberAccessProgram" && candidate.type === "select",
+  );
+  if (!descriptor || !descriptor.options.some((option) => option.id === "standard")) return null;
+  const hasBlue = descriptor.options.some((option) => option.id === "daybreakBlue");
+  const hasRed = descriptor.options.some((option) => option.id === "daybreakRed");
+  if (!hasBlue && !hasRed) return null;
+  const value = getProviderOptionCurrentValue(descriptor);
+  const selected =
+    (value === "daybreakBlue" && hasBlue) || (value === "daybreakRed" && hasRed) ? value : null;
+  return {
+    checked: selected !== null,
+    enabledValue: selected ?? (hasBlue ? "daybreakBlue" : "daybreakRed"),
+  };
+}
+
 export function buildProviderOptionSelectionsFromDescriptors(
   descriptors: ReadonlyArray<ProviderOptionDescriptor> | null | undefined,
 ): Array<ProviderOptionSelection> | undefined {

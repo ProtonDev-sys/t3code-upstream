@@ -155,14 +155,16 @@ function getSelectedTraits(
       });
   const selectDescriptors = descriptors.filter(
     (descriptor): descriptor is Extract<ProviderOptionDescriptor, { type: "select" }> =>
-      descriptor.type === "select",
+      descriptor.type === "select" && descriptor.id !== "cyberAccessProgram",
   );
   const booleanDescriptors = descriptors.filter(
     (descriptor): descriptor is Extract<ProviderOptionDescriptor, { type: "boolean" }> =>
       descriptor.type === "boolean",
   );
   const primarySelectDescriptor =
-    selectDescriptors.find((descriptor) => descriptor.id !== "cyberAccessProgram") ?? null;
+    selectDescriptors.find(
+      (descriptor) => provider !== "codex" || descriptor.id === "reasoningEffort",
+    ) ?? null;
   const contextWindowDescriptor =
     selectDescriptors.find((descriptor) => descriptor.id === "contextWindow") ?? null;
   const agentDescriptor = selectDescriptors.find((descriptor) => descriptor.id === "agent") ?? null;
@@ -486,20 +488,10 @@ export function buildTraitsTriggerDisplay(input: {
   ultrathinkPromptControlled: boolean;
 }): { label: string; speedIcon: "fast" | "ultrafast" | null } {
   let fastModeFallbackLabel: string | null = null;
-  let daybreakAvailable = false;
   let speedIcon: "fast" | "ultrafast" | null = null;
   const labels: Array<string> = [];
   for (const descriptor of input.descriptors) {
-    if (
-      input.provider === "codex" &&
-      descriptor.id === "cyberAccessProgram" &&
-      descriptor.type === "select"
-    ) {
-      daybreakAvailable = true;
-      const value = getProviderOptionCurrentValue(descriptor);
-      if (value === "daybreakBlue" || value === "daybreakRed") {
-        labels.push(value === "daybreakBlue" ? "Daybreak Blue" : "Daybreak Red");
-      }
+    if (descriptor.id === "cyberAccessProgram") {
       continue;
     }
     if (descriptor.id === "fastMode" && descriptor.type === "boolean") {
@@ -548,7 +540,7 @@ export function buildTraitsTriggerDisplay(input: {
   if (labels.length === 0 && fastModeFallbackLabel !== null) {
     return { label: fastModeFallbackLabel, speedIcon: null };
   }
-  return { label: labels.join(" · ") || (daybreakAvailable ? "Daybreak" : ""), speedIcon };
+  return { label: labels.join(" · "), speedIcon };
 }
 
 export const TraitsPicker = memo(function TraitsPicker({

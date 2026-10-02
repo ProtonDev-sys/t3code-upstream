@@ -39,6 +39,7 @@ import type {
   OrchestrationV2ConversationMessage,
   OrchestrationV2ExecutionNode,
   ModelSelection,
+  ModelCapabilities,
   OrchestrationV2PlanArtifact,
   OrchestrationV2ProviderCapabilities,
   OrchestrationV2ProviderFailure,
@@ -57,6 +58,7 @@ import type {
   ProviderThreadId,
   ProviderTurnId,
   ProviderInstanceId,
+  ServerProviderModel,
   RuntimeMode,
   RuntimeRequestId,
   ThreadId,
@@ -703,6 +705,7 @@ export function buildCodexTurnStartParams(input: {
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly modelSelection: ModelSelection;
   readonly providerInstanceId?: ProviderInstanceId;
+  readonly modelCapabilities?: ModelCapabilities | null;
   readonly hasT3Mcp?: boolean;
   readonly browserToolsAvailable?: boolean;
   readonly deviceToolsAvailable?: boolean;
@@ -729,10 +732,27 @@ export function buildCodexTurnStartParams(input: {
       input.omitServiceTier === true
         ? undefined
         : getCodexServiceTierOptionValue(input.modelSelection);
+    const selectedCyberProgram = getCodexCyberAccessProgramOptionValue(input.modelSelection);
+    const cyberDescriptor = input.modelCapabilities?.optionDescriptors?.find(
+      (descriptor) => descriptor.id === "cyberAccessProgram" && descriptor.type === "select",
+    );
+    const supportsDaybreak =
+      cyberDescriptor?.type === "select" &&
+      cyberDescriptor.options.some((option) => option.id === "standard") &&
+      cyberDescriptor.options.some(
+        (option) => option.id === "daybreakBlue" || option.id === "daybreakRed",
+      );
+    // The picker displays Off by default; omission lets Codex choose automatically.
     const cyberAccessProgram =
       input.providerInstanceId === undefined ||
       input.modelSelection.instanceId === input.providerInstanceId
-        ? getCodexCyberAccessProgramOptionValue(input.modelSelection)
+        ? input.modelCapabilities === undefined
+          ? selectedCyberProgram
+          : supportsDaybreak
+            ? cyberDescriptor.options.some((option) => option.id === selectedCyberProgram)
+              ? selectedCyberProgram
+              : "standard"
+            : undefined
         : undefined;
     const developerInstructions =
       input.hasT3Mcp !== true
@@ -1454,7 +1474,7 @@ export type CodexAdapterV2DriverEnv =
 
 export const createCodexAdapterV2 = (
   { instanceId, environment, enabled, config }: ProviderAdapterDriverCreateInput<CodexSettings>,
-  hooks: Pick<CodexAdapterV2Options, "onUsageLimits" | "resolveRuntime"> = {},
+  hooks: Pick<CodexAdapterV2Options, "models" | "onUsageLimits" | "resolveRuntime"> = {},
 ) =>
   Effect.gen(function* () {
     const clientFactory = yield* CodexAppServerClientFactory;
@@ -1536,6 +1556,7 @@ export interface CodexAdapterV2Options {
   readonly settings: CodexSettings;
   readonly environment: NodeJS.ProcessEnv;
   readonly clientFactory: CodexAppServerClientFactoryShape;
+  readonly models?: Effect.Effect<ReadonlyArray<ServerProviderModel>>;
   readonly onUsageLimits?: ServerProviderShape["applyUsageLimits"];
   /**
    * Resolves launch settings when each session opens, replacing `settings` and
@@ -5548,12 +5569,19 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                   ? yield* toCodexInput(turnInput)
                   : [];
               const mcpSession = McpProviderSession.readMcpProviderSession(turnInput.threadId);
+              const modelCapabilities =
+                adapterOptions.models === undefined
+                  ? undefined
+                  : ((yield* adapterOptions.models).find(
+                      (model) => model.slug === turnInput.modelSelection.model,
+                    )?.capabilities ?? null);
               const turnStartParams = yield* buildCodexTurnStartParams({
                 nativeThreadId: threadId,
                 codexInput,
                 runtimePolicy: turnInput.runtimePolicy,
                 modelSelection: turnInput.modelSelection,
                 providerInstanceId: adapterOptions.instanceId,
+                ...(modelCapabilities === undefined ? {} : { modelCapabilities }),
                 hasT3Mcp: mcpSession !== undefined,
                 browserToolsAvailable: mcpSession?.browserToolsAvailable ?? true,
                 deviceToolsAvailable: mcpSession?.capabilities?.has("device") ?? false,

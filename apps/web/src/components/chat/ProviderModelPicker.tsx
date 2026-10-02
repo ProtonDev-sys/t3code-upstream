@@ -3,7 +3,9 @@ import {
   type ProviderInstanceId,
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
+  type ProviderOptionSelection,
 } from "@t3tools/contracts";
+import { getCodexDaybreakToggleState, getProviderOptionDescriptors } from "@t3tools/shared/model";
 import { memo, useEffect, useMemo, useState } from "react";
 import { Badge } from "../ui/badge";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
@@ -11,6 +13,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
+import { CodexDaybreakToggle } from "./CodexDaybreakToggle";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import {
   ModelEsque,
@@ -25,6 +28,7 @@ import {
 } from "./ComposerControl";
 import { useComposerMenuProps } from "./composerEventScope";
 import { shortcutLabelForCommand } from "../../keybindings";
+import { getProviderModelCapabilities } from "../../providerModels";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -41,6 +45,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
   keybindings?: ResolvedKeybindingsConfig;
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
+  providerOptions?: ReadonlyArray<ProviderOptionSelection> | null | undefined;
+  onProviderOptionsChange?: (options: ReadonlyArray<ProviderOptionSelection> | undefined) => void;
   activeProviderIconClassName?: string;
   instanceIndicatorBackground?: string;
   size?: ComposerControlSize;
@@ -74,6 +80,28 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const activeInstanceId = props.activeInstanceId;
   const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? [];
+  const daybreakDescriptors = useMemo(() => {
+    if (
+      activeEntry?.driverKind !== "codex" ||
+      props.selectedModels !== undefined ||
+      props.triggerLabel !== undefined ||
+      !props.onProviderOptionsChange
+    ) {
+      return [];
+    }
+    return getProviderOptionDescriptors({
+      caps: getProviderModelCapabilities(activeEntry.models, props.model, activeEntry.driverKind),
+      selections: props.providerOptions,
+    });
+  }, [
+    activeEntry,
+    props.model,
+    props.onProviderOptionsChange,
+    props.providerOptions,
+    props.selectedModels,
+    props.triggerLabel,
+  ]);
+  const daybreakState = getCodexDaybreakToggleState(daybreakDescriptors);
   // Account-specific catalogs must keep the selected model label while unavailable.
   const selectedModel =
     resolveModelPickerSelectedModel({
@@ -279,6 +307,17 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               Unavailable
             </Badge>
           ) : null}
+          {daybreakState?.checked ? (
+            <Badge
+              variant="outline"
+              size="sm"
+              title={
+                daybreakState.enabledValue === "daybreakBlue" ? "Daybreak Blue" : "Daybreak Red"
+              }
+            >
+              Daybreak
+            </Badge>
+          ) : null}
         </span>
         <span aria-hidden="true" className="flex items-center">
           <ComposerControlChevron size={size} />
@@ -314,6 +353,13 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             : {})}
           onInstanceModelChange={handleInstanceModelChange}
         />
+        {props.onProviderOptionsChange && daybreakState ? (
+          <CodexDaybreakToggle
+            descriptors={daybreakDescriptors}
+            disabled={props.disabled ?? false}
+            onOptionsChange={props.onProviderOptionsChange}
+          />
+        ) : null}
         {props.selectedModels === undefined ? (
           <ChatGptSharingControl provider={activeEntry?.snapshot ?? null} />
         ) : null}
