@@ -282,7 +282,7 @@ export function applyPreferredCodexDefaultModel(
  * the first built-in's descriptors; an entry with its own capabilities keeps
  * them.
  */
-export function appendCustomCodexModels(
+function appendCustomCodexModels(
   models: ReadonlyArray<ServerProviderModel>,
   customModels: ReadonlyArray<CustomModelSetting>,
 ): ReadonlyArray<ServerProviderModel> {
@@ -296,13 +296,9 @@ export function appendCustomCodexModels(
   const fallbackCapabilities = firstCapabilities
     ? {
         ...firstCapabilities,
-        ...(firstCapabilities.optionDescriptors
-          ? {
-              optionDescriptors: firstCapabilities.optionDescriptors.filter(
-                (descriptor) => descriptor.id !== "cyberAccessProgram",
-              ),
-            }
-          : {}),
+        optionDescriptors: firstCapabilities.optionDescriptors?.filter(
+          (descriptor) => descriptor.id !== "cyberAccessProgram",
+        ),
       }
     : null;
   const customEntries: ServerProviderModel[] = [];

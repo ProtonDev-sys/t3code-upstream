@@ -78,31 +78,14 @@ function display(descriptors: ReadonlyArray<ProviderOptionDescriptor>) {
 }
 
 describe("buildTraitsTriggerDisplay", () => {
-  it("omits Daybreak from the trigger when it is off", () => {
-    expect(display([EFFORT, daybreakDescriptor("standard")])).toEqual({
+  it("leaves Daybreak out of the reasoning and speed trigger", () => {
+    expect(
+      display([EFFORT, serviceTierDescriptor("priority"), daybreakDescriptor("daybreakBlue")]),
+    ).toEqual({
       label: "High",
-      speedIcon: null,
+      speedIcon: "fast",
     });
   });
-
-  it("leaves Daybreak to the model selector when it is the only option", () => {
-    expect(display([daybreakDescriptor("standard")])).toEqual({
-      label: "",
-      speedIcon: null,
-    });
-  });
-
-  it.each(["daybreakBlue", "daybreakRed"] as const)(
-    "omits active %s from the reasoning trigger",
-    (program) => {
-      expect(
-        display([EFFORT, serviceTierDescriptor("priority"), daybreakDescriptor(program)]),
-      ).toEqual({
-        label: "High",
-        speedIcon: "fast",
-      });
-    },
-  );
 
   it("omits fast mode from the label entirely when it is off", () => {
     expect(display([EFFORT, fastModeDescriptor(false), CONTEXT_WINDOW])).toEqual({

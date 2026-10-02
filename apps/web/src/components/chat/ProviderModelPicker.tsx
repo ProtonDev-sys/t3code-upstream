@@ -3,9 +3,8 @@ import {
   type ProviderInstanceId,
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
-  type ProviderOptionSelection,
+  type ModelSelection,
 } from "@t3tools/contracts";
-import { getCodexDaybreakToggleState, getProviderOptionDescriptors } from "@t3tools/shared/model";
 import { memo, useEffect, useMemo, useState } from "react";
 import { Badge } from "../ui/badge";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
@@ -13,7 +12,6 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
-import { CodexDaybreakToggle } from "./CodexDaybreakToggle";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import {
   ModelEsque,
@@ -28,7 +26,6 @@ import {
 } from "./ComposerControl";
 import { useComposerMenuProps } from "./composerEventScope";
 import { shortcutLabelForCommand } from "../../keybindings";
-import { getProviderModelCapabilities } from "../../providerModels";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -38,15 +35,15 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   activeInstanceId: ProviderInstanceId;
   model: string;
   selectedModels?: ReadonlyArray<{ instanceId: ProviderInstanceId; model: string }>;
-  onToggleModel?: (instanceId: ProviderInstanceId, model: string) => void;
+  onToggleModel?: (selection: ModelSelection) => void;
   lockedProvider: ProviderDriverKind | null;
   lockedContinuationGroupKey?: string | null;
   /** Instance entries rendered in the sidebar + used to resolve display name. */
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
   keybindings?: ResolvedKeybindingsConfig;
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
-  providerOptions?: ReadonlyArray<ProviderOptionSelection> | null | undefined;
-  onProviderOptionsChange?: (options: ReadonlyArray<ProviderOptionSelection> | undefined) => void;
+  /** Native-turn selectors provide the current options and enable Daybreak picker mode. */
+  modelSelection?: ModelSelection | null | undefined;
   activeProviderIconClassName?: string;
   instanceIndicatorBackground?: string;
   size?: ComposerControlSize;
@@ -62,7 +59,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   onOpenChange?: (open: boolean) => void;
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
-  onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  onInstanceModelChange: (selection: ModelSelection) => void;
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
@@ -80,28 +77,6 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const activeInstanceId = props.activeInstanceId;
   const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? [];
-  const daybreakDescriptors = useMemo(() => {
-    if (
-      activeEntry?.driverKind !== "codex" ||
-      props.selectedModels !== undefined ||
-      props.triggerLabel !== undefined ||
-      !props.onProviderOptionsChange
-    ) {
-      return [];
-    }
-    return getProviderOptionDescriptors({
-      caps: getProviderModelCapabilities(activeEntry.models, props.model, activeEntry.driverKind),
-      selections: props.providerOptions,
-    });
-  }, [
-    activeEntry,
-    props.model,
-    props.onProviderOptionsChange,
-    props.providerOptions,
-    props.selectedModels,
-    props.triggerLabel,
-  ]);
-  const daybreakState = getCodexDaybreakToggleState(daybreakDescriptors);
   // Account-specific catalogs must keep the selected model label while unavailable.
   const selectedModel =
     resolveModelPickerSelectedModel({
@@ -178,9 +153,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     };
   }, [isMenuOpen]);
 
-  const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
+  const handleInstanceModelChange = (selection: ModelSelection) => {
     if (props.disabled) return;
-    props.onInstanceModelChange(instanceId, model);
+    props.onInstanceModelChange(selection);
     setIsMenuOpen(false);
   };
 
@@ -307,17 +282,6 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               Unavailable
             </Badge>
           ) : null}
-          {daybreakState?.checked ? (
-            <Badge
-              variant="outline"
-              size="sm"
-              title={
-                daybreakState.enabledValue === "daybreakBlue" ? "Daybreak Blue" : "Daybreak Red"
-              }
-            >
-              Daybreak
-            </Badge>
-          ) : null}
         </span>
         <span aria-hidden="true" className="flex items-center">
           <ComposerControlChevron size={size} />
@@ -332,11 +296,12 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         <ModelPickerContent
           activeInstanceId={activeInstanceId}
           model={props.model}
+          modelSelection={props.modelSelection}
           {...(props.selectedModels !== undefined ? { selectedModels: props.selectedModels } : {})}
           {...(props.onToggleModel
             ? {
-                onToggleModel: (instanceId: ProviderInstanceId, model: string) => {
-                  if (!props.disabled) props.onToggleModel?.(instanceId, model);
+                onToggleModel: (selection: ModelSelection) => {
+                  if (!props.disabled) props.onToggleModel?.(selection);
                 },
               }
             : {})}
@@ -353,13 +318,6 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             : {})}
           onInstanceModelChange={handleInstanceModelChange}
         />
-        {props.onProviderOptionsChange && daybreakState ? (
-          <CodexDaybreakToggle
-            descriptors={daybreakDescriptors}
-            disabled={props.disabled ?? false}
-            onOptionsChange={props.onProviderOptionsChange}
-          />
-        ) : null}
         {props.selectedModels === undefined ? (
           <ChatGptSharingControl provider={activeEntry?.snapshot ?? null} />
         ) : null}

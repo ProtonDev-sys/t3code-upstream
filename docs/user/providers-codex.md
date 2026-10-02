@@ -25,16 +25,6 @@ T3 Code can use your installed Codex and its existing login. Run `codex login`
 on the environment's machine to sign in. [Provider setup](./install.md#providers)
 covers installation and custom configuration.
 
-## Use Daybreak
-
-For an account and model with approved Daybreak access, turn on **Daybreak** in
-the model selector. Turn it off to return to standard treatment. On mobile, use
-the Daybreak toggle in the thread settings' model section.
-
-The choice applies to subsequent turns and is saved with that account and model's
-options. Switching models restores the destination model's saved options.
-Daybreak does not grant access or remove OpenAI's remaining request limits.
-
 ## Use multiple accounts
 
 Add another ChatGPT account in **Settings → Providers**, then select the account

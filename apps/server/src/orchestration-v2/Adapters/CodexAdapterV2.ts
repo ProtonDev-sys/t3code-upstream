@@ -39,7 +39,6 @@ import type {
   OrchestrationV2ConversationMessage,
   OrchestrationV2ExecutionNode,
   ModelSelection,
-  ModelCapabilities,
   OrchestrationV2PlanArtifact,
   OrchestrationV2ProviderCapabilities,
   OrchestrationV2ProviderFailure,
@@ -83,10 +82,7 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
-import {
-  getCodexCyberAccessProgramOptionValue,
-  getCodexServiceTierOptionValue,
-} from "../../codexModelOptions.ts";
+import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import {
@@ -639,6 +635,7 @@ const decodeTurnSandboxPolicy = Schema.decodeUnknownEffect(
 const decodeTurnReasoningEffort = Schema.decodeUnknownEffect(
   Schema.Union([CodexSchema.V2TurnStartParams__ReasoningEffort, Schema.Null]),
 );
+const isCodexCyberAccessProgram = Schema.is(CodexSchema.V2TurnStartParams__CyberAccessProgram);
 
 const CodexTurnStartParamsWithCollaborationMode = CodexSchema.V2TurnStartParams.pipe(
   Schema.fieldsAssign({
@@ -704,8 +701,7 @@ export function buildCodexTurnStartParams(input: {
   readonly codexInput: ReadonlyArray<CodexSchema.V2TurnStartParams__UserInput>;
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly modelSelection: ModelSelection;
-  readonly providerInstanceId?: ProviderInstanceId;
-  readonly modelCapabilities?: ModelCapabilities | null;
+  readonly cyberAccessProgram?: CodexSchema.V2TurnStartParams__CyberAccessProgram;
   readonly hasT3Mcp?: boolean;
   readonly browserToolsAvailable?: boolean;
   readonly deviceToolsAvailable?: boolean;
@@ -732,28 +728,6 @@ export function buildCodexTurnStartParams(input: {
       input.omitServiceTier === true
         ? undefined
         : getCodexServiceTierOptionValue(input.modelSelection);
-    const selectedCyberProgram = getCodexCyberAccessProgramOptionValue(input.modelSelection);
-    const cyberDescriptor = input.modelCapabilities?.optionDescriptors?.find(
-      (descriptor) => descriptor.id === "cyberAccessProgram" && descriptor.type === "select",
-    );
-    const supportsDaybreak =
-      cyberDescriptor?.type === "select" &&
-      cyberDescriptor.options.some((option) => option.id === "standard") &&
-      cyberDescriptor.options.some(
-        (option) => option.id === "daybreakBlue" || option.id === "daybreakRed",
-      );
-    // The picker displays Off by default; omission lets Codex choose automatically.
-    const cyberAccessProgram =
-      input.providerInstanceId === undefined ||
-      input.modelSelection.instanceId === input.providerInstanceId
-        ? input.modelCapabilities === undefined
-          ? selectedCyberProgram
-          : supportsDaybreak
-            ? cyberDescriptor.options.some((option) => option.id === selectedCyberProgram)
-              ? selectedCyberProgram
-              : "standard"
-            : undefined
-        : undefined;
     const developerInstructions =
       input.hasT3Mcp !== true
         ? undefined
@@ -798,7 +772,9 @@ export function buildCodexTurnStartParams(input: {
       ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
       ...(effort === undefined ? {} : { effort }),
       ...(serviceTier === undefined ? {} : { serviceTier }),
-      ...(cyberAccessProgram === undefined ? {} : { cyberAccessProgram }),
+      ...(input.cyberAccessProgram === undefined
+        ? {}
+        : { cyberAccessProgram: input.cyberAccessProgram }),
       ...(collaborationMode === undefined ? {} : { collaborationMode }),
     });
   });
@@ -5569,19 +5545,37 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                   ? yield* toCodexInput(turnInput)
                   : [];
               const mcpSession = McpProviderSession.readMcpProviderSession(turnInput.threadId);
-              const modelCapabilities =
-                adapterOptions.models === undefined
-                  ? undefined
-                  : ((yield* adapterOptions.models).find(
-                      (model) => model.slug === turnInput.modelSelection.model,
-                    )?.capabilities ?? null);
+              const models =
+                adapterOptions.models === undefined ? [] : yield* adapterOptions.models;
+              const cyberDescriptor = models
+                .find((model) => model.slug === turnInput.modelSelection.model)
+                ?.capabilities?.optionDescriptors?.find(
+                  (descriptor) =>
+                    descriptor.id === "cyberAccessProgram" && descriptor.type === "select",
+                );
+              const selectedCyberProgram = getModelSelectionStringOptionValue(
+                turnInput.modelSelection,
+                "cyberAccessProgram",
+              );
+              // Displayed Off must request standard; omission lets Codex choose automatically.
+              const cyberAccessProgram =
+                turnInput.modelSelection.instanceId === adapterOptions.instanceId &&
+                cyberDescriptor?.type === "select" &&
+                cyberDescriptor.options.some((option) => option.id === "standard") &&
+                cyberDescriptor.options.some(
+                  (option) => option.id === "daybreakBlue" || option.id === "daybreakRed",
+                )
+                  ? isCodexCyberAccessProgram(selectedCyberProgram) &&
+                    cyberDescriptor.options.some((option) => option.id === selectedCyberProgram)
+                    ? selectedCyberProgram
+                    : "standard"
+                  : undefined;
               const turnStartParams = yield* buildCodexTurnStartParams({
                 nativeThreadId: threadId,
                 codexInput,
                 runtimePolicy: turnInput.runtimePolicy,
                 modelSelection: turnInput.modelSelection,
-                providerInstanceId: adapterOptions.instanceId,
-                ...(modelCapabilities === undefined ? {} : { modelCapabilities }),
+                ...(cyberAccessProgram === undefined ? {} : { cyberAccessProgram }),
                 hasT3Mcp: mcpSession !== undefined,
                 browserToolsAvailable: mcpSession?.browserToolsAvailable ?? true,
                 deviceToolsAvailable: mcpSession?.capabilities?.has("device") ?? false,

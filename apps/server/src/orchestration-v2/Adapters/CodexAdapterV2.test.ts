@@ -415,120 +415,6 @@ describe("CodexAdapterV2 assistant message streaming", () => {
 });
 
 describe("CodexAdapterV2 runtime policy", () => {
-  it.effect("requests standard for the advertised Off default and rejected saved programs", () =>
-    Effect.gen(function* () {
-      const instanceId = ProviderInstanceId.make("codex");
-      for (const options of [
-        undefined,
-        [{ id: "cyberAccessProgram", value: "invalid" }],
-        [{ id: "cyberAccessProgram", value: "daybreakRed" }],
-      ]) {
-        const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
-          nativeThreadId: "native-daybreak-default",
-          codexInput: [{ type: "text", text: "test" }],
-          runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: null },
-          providerInstanceId: instanceId,
-          modelCapabilities: codexDaybreakTestCapabilities(["standard", "daybreakBlue"]),
-          modelSelection: {
-            instanceId,
-            model: "gpt-6-sol",
-            ...(options === undefined ? {} : { options }),
-          },
-        });
-        assert.equal(params.cyberAccessProgram, "standard");
-      }
-    }),
-  );
-
-  it.effect("omits cyber treatment for models without advertised Daybreak access", () =>
-    Effect.gen(function* () {
-      const instanceId = ProviderInstanceId.make("codex");
-      for (const modelCapabilities of [
-        null,
-        { optionDescriptors: [] },
-        codexDaybreakTestCapabilities(["standard"]),
-      ]) {
-        for (const program of ["standard", "daybreakBlue", "daybreakRed"]) {
-          const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
-            nativeThreadId: "native-daybreak-unavailable",
-            codexInput: [{ type: "text", text: "test" }],
-            runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: null },
-            providerInstanceId: instanceId,
-            modelCapabilities,
-            modelSelection: {
-              instanceId,
-              model: "gpt-6-sol",
-              options: [{ id: "cyberAccessProgram", value: program }],
-            },
-          });
-          assert.notProperty(params, "cyberAccessProgram");
-        }
-      }
-    }),
-  );
-
-  it.effect("forwards explicit Daybreak and off choices alongside other model options", () =>
-    Effect.gen(function* () {
-      const instanceId = ProviderInstanceId.make("codex-secondary");
-      for (const program of ["standard", "daybreakBlue", "daybreakRed"]) {
-        const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
-          nativeThreadId: "native-daybreak",
-          codexInput: [{ type: "text", text: "test" }],
-          runtimePolicy: {
-            runtimeMode: "full-access",
-            interactionMode: "plan",
-            cwd: "/workspace/daybreak",
-          },
-          providerInstanceId: instanceId,
-          modelSelection: {
-            instanceId,
-            model: "gpt-6-sol",
-            options: [
-              { id: "reasoningEffort", value: "high" },
-              { id: "serviceTier", value: "priority" },
-              { id: "cyberAccessProgram", value: program },
-            ],
-          },
-        });
-
-        assert.equal(params.cyberAccessProgram, program);
-        assert.equal(params.model, "gpt-6-sol");
-        assert.equal(params.effort, "high");
-        assert.equal(params.serviceTier, "priority");
-        assert.equal(params.cwd, "/workspace/daybreak");
-        assert.equal(params.collaborationMode?.settings.reasoning_effort, "high");
-      }
-    }),
-  );
-
-  it.effect("omits absent, invalid and other-account Daybreak choices", () =>
-    Effect.gen(function* () {
-      const instanceId = ProviderInstanceId.make("codex");
-      for (const modelSelection of [
-        { instanceId, model: "gpt-6-sol" },
-        {
-          instanceId,
-          model: "gpt-6-sol",
-          options: [{ id: "cyberAccessProgram", value: "invalid" }],
-        },
-        {
-          instanceId: ProviderInstanceId.make("other-codex-account"),
-          model: "gpt-6-sol",
-          options: [{ id: "cyberAccessProgram", value: "daybreakBlue" }],
-        },
-      ]) {
-        const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
-          nativeThreadId: "native-daybreak",
-          codexInput: [{ type: "text", text: "test" }],
-          runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: null },
-          providerInstanceId: instanceId,
-          modelSelection,
-        });
-        assert.notProperty(params, "cyberAccessProgram");
-      }
-    }),
-  );
-
   it.effect("derives concrete Codex turn policies from every T3 runtime mode", () =>
     Effect.gen(function* () {
       const build = (
@@ -695,6 +581,7 @@ describe("CodexAdapterV2 runtime policy", () => {
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
         nativeThreadId: "native-model-options",
+        cyberAccessProgram: "daybreakBlue",
         codexInput: [{ type: "text", text: "test" }],
         runtimePolicy: {
           runtimeMode: "full-access",
@@ -715,6 +602,7 @@ describe("CodexAdapterV2 runtime policy", () => {
       assert.equal(params.model, "gpt-5.4");
       assert.equal(params.effort, "xhigh");
       assert.equal(params.serviceTier, "priority");
+      assert.equal(params.cyberAccessProgram, "daybreakBlue");
       assert.equal(params.cwd, "/workspace/model-options");
       assert.equal(params.collaborationMode?.settings.model, "gpt-5.4");
       assert.equal(params.collaborationMode?.settings.reasoning_effort, "xhigh");
@@ -1600,6 +1488,8 @@ function codexReplayPreamble(input: {
   readonly prompt: string;
   /** Text the adapter should send, when it differs from what the user typed. */
   readonly sentPrompt?: string;
+  readonly cyberAccessProgram?: string;
+  readonly turnRequestId?: number;
 }): Array<CodexReplay.CodexAppServerReplayEntry> {
   return [
     {
@@ -1683,7 +1573,7 @@ function codexReplayPreamble(input: {
       type: "expect_outbound",
       label: "turn/start",
       frame: {
-        id: 3,
+        id: input.turnRequestId ?? 3,
         method: "turn/start",
         params: {
           threadId: input.nativeThreadId,
@@ -1694,6 +1584,9 @@ function codexReplayPreamble(input: {
           approvalsReviewer: "user",
           sandboxPolicy: { type: "dangerFullAccess" },
           summary: "detailed",
+          ...(input.cyberAccessProgram === undefined
+            ? {}
+            : { cyberAccessProgram: input.cyberAccessProgram }),
         },
       },
     },
@@ -1701,7 +1594,7 @@ function codexReplayPreamble(input: {
       type: "emit_inbound",
       label: "turn/start",
       frame: {
-        id: 3,
+        id: input.turnRequestId ?? 3,
         result: { turn: makeCodexReplayTurn({ id: input.nativeTurnId, status: "inProgress" }) },
       },
     },
@@ -1859,194 +1752,134 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       };
     });
 
-  for (const [account, selectionMode] of [
-    ["bound", "explicit"],
-    ["other", "explicit"],
-    ["bound", "default"],
-    ["bound", "revoked"],
-    ["bound", "removed"],
+  for (const [selected, expected, mode] of [
+    ["daybreakBlue", "daybreakBlue"],
+    ["daybreakRed", "daybreakRed"],
+    ["standard", "standard"],
+    [undefined, "standard"],
+    ["unknown", "standard"],
+    ["daybreakBlue", undefined, "absent"],
+    ["daybreakBlue", undefined, "standard-only"],
+    ["daybreakBlue", undefined, "other-account"],
+    ["daybreakBlue", "daybreakBlue", "revoked"],
+    ["daybreakBlue", "daybreakBlue", "removed"],
   ] as const) {
-    it.effect(
-      `uses the ${account} account's ${selectionMode} Daybreak choice before and after resume`,
-      () =>
-        Effect.scoped(
-          Effect.gen(function* () {
-            const nativeThreadId = `daybreak-${account}-thread`;
-            const instanceId =
-              account === "bound"
-                ? CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID
-                : ProviderInstanceId.make("other-codex-account");
-            const modelSelection = (program: string): ModelSelection => ({
-              instanceId,
-              model: "gpt-6-sol",
-              options: [
-                { id: "reasoningEffort", value: "high" },
-                { id: "serviceTier", value: "priority" },
-                ...(selectionMode === "default"
-                  ? []
-                  : [
-                      {
-                        id: "cyberAccessProgram",
-                        value:
-                          selectionMode === "revoked" || selectionMode === "removed"
-                            ? "daybreakBlue"
-                            : program,
-                      },
-                    ]),
-              ],
-            });
-            const turnEntries = (
-              requestId: number,
-              nativeTurnId: string,
-              program: string,
-            ): Array<CodexReplay.CodexAppServerReplayEntry> => [
-              {
-                type: "expect_outbound",
-                label: `turn/start/${program}`,
-                frame: {
-                  id: requestId,
-                  method: "turn/start",
-                  params: {
-                    threadId: nativeThreadId,
-                    input: [{ type: "text", text: program }],
-                    cwd: "/workspace",
-                    model: "gpt-6-sol",
-                    effort: "high",
-                    serviceTier: "priority",
-                    approvalPolicy: "never",
-                    approvalsReviewer: "user",
-                    sandboxPolicy: { type: "dangerFullAccess" },
-                    summary: "detailed",
-                    ...(account === "bound" &&
-                    !(selectionMode === "removed" && program === "standard")
-                      ? {
-                          cyberAccessProgram: selectionMode === "default" ? "standard" : program,
-                        }
-                      : {}),
-                  },
-                },
-              },
+    it.effect(`forwards Daybreak ${selected}/${mode} correctly before and after resume`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const nativeThreadId = "daybreak-thread";
+          const selection = (program: string | undefined): ModelSelection => ({
+            ...CODEX_TEST_MODEL_SELECTION,
+            ...(mode === "other-account"
+              ? { instanceId: ProviderInstanceId.make("other-codex") }
+              : {}),
+            ...(program === undefined
+              ? {}
+              : { options: [{ id: "cyberAccessProgram", value: program }] }),
+          });
+          const catalogModel = (programs: ReadonlyArray<string>) => ({
+            slug: CODEX_TEST_MODEL_SELECTION.model,
+            name: "Test",
+            isCustom: false,
+            capabilities: codexDaybreakTestCapabilities(programs),
+          });
+          const catalog = yield* Ref.make(
+            mode === "absent"
+              ? []
+              : [
+                  catalogModel(
+                    mode === "standard-only"
+                      ? ["standard"]
+                      : ["standard", "daybreakBlue", "daybreakRed", "unknown"],
+                  ),
+                ],
+          );
+          const transcript = makeCodexReplayTranscript({
+            scenario: `daybreak-${selected}-${mode}`,
+            entries: [
+              ...codexReplayPreamble({
+                nativeThreadId,
+                nativeTurnId: "first",
+                prompt: "work",
+                ...(expected === undefined ? {} : { cyberAccessProgram: expected }),
+              }),
               {
                 type: "emit_inbound",
-                label: `turn/start/${program}`,
-                frame: {
-                  id: requestId,
-                  result: { turn: makeCodexReplayTurn({ id: nativeTurnId, status: "inProgress" }) },
-                },
-              },
-              {
-                type: "emit_inbound",
-                label: `turn/completed/${program}`,
                 frame: {
                   method: "turn/completed",
                   params: {
                     threadId: nativeThreadId,
-                    turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+                    turn: makeCodexReplayTurn({ id: "first", status: "completed" }),
                   },
                 },
               },
-            ];
-            const transcript = makeCodexReplayTranscript({
-              scenario: `daybreak-${account}-resume`,
-              entries: [
-                ...codexReplayPreamble({
-                  nativeThreadId,
-                  nativeTurnId: "unused",
-                  prompt: "unused",
-                }).slice(0, 5),
-                ...turnEntries(3, "daybreak-enabled-turn", "daybreakBlue"),
-                {
-                  type: "expect_outbound",
-                  label: "thread/resume",
-                  frame: {
-                    id: 4,
-                    method: "thread/resume",
-                    params: {
-                      threadId: nativeThreadId,
-                      excludeTurns: true,
-                      model: "gpt-6-sol",
-                      cwd: "/workspace",
-                      config: CodexAdapterV2.CODEX_THREAD_CONFIG,
-                    },
-                  },
-                },
-                {
-                  type: "emit_inbound",
-                  label: "thread/resume",
-                  frame: {
-                    id: 4,
-                    result: { thread: { id: nativeThreadId, updatedAt: 1782622450 } },
-                  },
-                },
-                ...turnEntries(5, "daybreak-off-turn", "standard"),
-              ],
-            });
-            const bothTerminal = yield* Deferred.make<void>();
-            const catalog = yield* Ref.make([
               {
-                slug: "gpt-6-sol",
-                name: "Sol",
-                isCustom: false,
-                capabilities: codexDaybreakTestCapabilities(["standard", "daybreakBlue"]),
+                type: "expect_outbound",
+                frame: {
+                  id: 4,
+                  method: "thread/resume",
+                  params: {
+                    threadId: nativeThreadId,
+                    excludeTurns: true,
+                    config: CodexAdapterV2.CODEX_THREAD_CONFIG,
+                  },
+                },
               },
+              {
+                type: "emit_inbound",
+                frame: { id: 4, result: { thread: { id: nativeThreadId, updatedAt: 1782622450 } } },
+              },
+              ...codexReplayPreamble({
+                nativeThreadId,
+                nativeTurnId: "second",
+                prompt: "work",
+                turnRequestId: 5,
+                ...(expected === undefined || mode === "removed"
+                  ? {}
+                  : { cyberAccessProgram: "standard" }),
+              }).slice(5),
+            ],
+          });
+          const harness = yield* makeCodexReplayHarness(
+            transcript,
+            undefined,
+            undefined,
+            undefined,
+            Ref.get(catalog),
+          );
+          const turnInput = makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("first-attempt"),
+            text: "work",
+          });
+          yield* harness.runtime.startTurn({ ...turnInput, modelSelection: selection(selected) });
+          yield* harness.firstTerminal;
+          if (mode === "revoked" || mode === "removed") {
+            yield* Ref.set(catalog, [
+              catalogModel(mode === "revoked" ? ["standard", "daybreakRed"] : ["standard"]),
             ]);
-            let terminalCount = 0;
-            const harness = yield* makeCodexReplayHarness(
-              transcript,
-              (event) =>
-                event.type === "turn.terminal" && ++terminalCount === 2
-                  ? Deferred.succeed(bothTerminal, undefined)
-                  : Effect.void,
-              undefined,
-              undefined,
-              Ref.get(catalog),
-            );
-            yield* harness.runtime.startTurn({
-              ...makeCodexTestTurnInput({
-                threadId: harness.threadId,
-                providerThread: harness.providerThread,
-                now: yield* DateTime.now,
-                attemptId: RunAttemptId.make("daybreak-enabled-attempt"),
-                text: "daybreakBlue",
-              }),
-              modelSelection: modelSelection("daybreakBlue"),
-            });
-            yield* harness.firstTerminal;
-            if (selectionMode === "revoked" || selectionMode === "removed") {
-              yield* Ref.update(catalog, (models) =>
-                models.map((model) => ({
-                  ...model,
-                  capabilities: codexDaybreakTestCapabilities(
-                    selectionMode === "revoked" ? ["standard", "daybreakRed"] : ["standard"],
-                  ),
-                })),
-              );
-            }
-            const resumedThread = yield* harness.runtime.resumeThread({
-              providerThread: harness.providerThread,
-              modelSelection: modelSelection("standard"),
-              runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
-            });
-            yield* harness.runtime.startTurn({
-              ...makeCodexTestTurnInput({
-                threadId: harness.threadId,
-                providerThread: resumedThread,
-                now: yield* DateTime.now,
-                attemptId: RunAttemptId.make("daybreak-off-attempt"),
-                text: "standard",
-              }),
-              runOrdinal: 2,
-              providerTurnOrdinal: 2,
-              modelSelection: modelSelection("standard"),
-            });
-            yield* Deferred.await(bothTerminal);
-            assert.equal(
-              resumedThread.providerInstanceId,
-              CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
-            );
-            assert.equal(harness.terminalEvents().length, 2);
-          }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
-        ),
+          }
+          const providerThread = yield* harness.runtime.resumeThread({
+            providerThread: harness.providerThread,
+          });
+          yield* harness.runtime.startTurn({
+            ...turnInput,
+            providerThread,
+            runOrdinal: 2,
+            providerTurnOrdinal: 2,
+            attemptId: RunAttemptId.make("second-attempt"),
+            modelSelection: selection(
+              mode === "revoked" || mode === "removed"
+                ? selected
+                : selected === undefined
+                  ? undefined
+                  : "standard",
+            ),
+          });
+        }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+      ),
     );
   }
 

@@ -28,7 +28,6 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { createModelSelection } from "@t3tools/shared/model";
 
 import { formatRelativeTime } from "../../timestampFormat";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
@@ -803,23 +802,15 @@ function ScheduledTaskEditorDialog({
                 lockedProvider={null}
                 instanceEntries={instanceEntries}
                 modelOptionsByInstance={modelOptionsByInstance}
-                providerOptions={activeSelection?.options}
-                onProviderOptionsChange={(options) => {
-                  if (!activeSelection) return;
-                  setDraft((current) => ({
-                    ...current,
-                    modelKey: `${activeSelection.instanceId}:${activeSelection.model}`,
-                    baseModelSelection: createModelSelection(
-                      activeSelection.instanceId,
-                      activeSelection.model,
-                      options,
-                    ),
-                  }));
-                }}
+                modelSelection={activeSelection}
                 isComposerOwned={false}
                 triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                onInstanceModelChange={(instanceId, model) =>
-                  setDraft((current) => ({ ...current, modelKey: `${instanceId}:${model}` }))
+                onInstanceModelChange={(selection) =>
+                  setDraft((current) => ({
+                    ...current,
+                    modelKey: `${selection.instanceId}:${selection.model}`,
+                    baseModelSelection: selection,
+                  }))
                 }
               />
             </Field>

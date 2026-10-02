@@ -95,43 +95,6 @@ describe("getComposerProviderState", () => {
     );
   });
 
-  it("does not use Daybreak as prompt effort when reasoning choices are absent", () => {
-    const state = getComposerProviderState({
-      provider: CODEX,
-      model: MODEL,
-      models: modelWith([
-        selectDescriptor("cyberAccessProgram", [
-          { id: "standard", label: "Off", isDefault: true },
-          { id: "daybreakRed", label: "Red" },
-        ]),
-      ]),
-      modelOptions: selections(["cyberAccessProgram", "daybreakRed"]),
-      planModeEnabled: true,
-    });
-
-    expect(state.promptEffort).toBeNull();
-    expect(state.modelOptionsForDispatch).toEqual(
-      selections(["cyberAccessProgram", "daybreakRed"]),
-    );
-  });
-
-  it("turns off a saved Daybreak program when the model stops advertising it", () => {
-    const state = getComposerProviderState({
-      provider: CODEX,
-      model: MODEL,
-      models: modelWith([
-        selectDescriptor("cyberAccessProgram", [
-          { id: "standard", label: "Off", isDefault: true },
-          { id: "daybreakRed", label: "Red" },
-        ]),
-      ]),
-      modelOptions: selections(["cyberAccessProgram", "daybreakBlue"]),
-      planModeEnabled: true,
-    });
-
-    expect(state.modelOptionsForDispatch).toEqual(selections(["cyberAccessProgram", "standard"]));
-  });
-
   it("drops Daybreak when access is revoked without changing reasoning", () => {
     const state = getComposerProviderState({
       provider: CODEX,

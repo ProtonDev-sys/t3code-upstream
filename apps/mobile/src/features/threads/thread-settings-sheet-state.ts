@@ -1,5 +1,6 @@
 import type { ModelOption, ProviderGroup } from "../../lib/modelOptions";
 import type { ProviderInstanceId } from "@t3tools/contracts";
+import { getCodexDaybreakToggleState, getProviderOptionDescriptors } from "@t3tools/shared/model";
 
 export type ModelFavorite = {
   readonly provider: ProviderInstanceId;
@@ -58,11 +59,58 @@ export function pendingModelAfterPress(input: {
   readonly current: ModelOption | null;
   readonly pressed: ModelOption;
   readonly pressedIsApplied: boolean;
+  readonly daybreakEnabled?: boolean;
 }): ModelOption | null {
-  if (input.pressedIsApplied) {
+  const pressed = input.current?.key === input.pressed.key ? input.current : input.pressed;
+  const daybreak =
+    input.daybreakEnabled === undefined ? null : getModelDaybreakToggleState(pressed);
+  if (input.pressedIsApplied && !daybreak) {
     return null;
   }
-  return input.current?.key === input.pressed.key ? input.current : input.pressed;
+  return daybreak
+    ? {
+        ...pressed,
+        selection: {
+          ...pressed.selection,
+          options: [
+            ...(pressed.selection.options ?? []).filter(
+              (option) => option.id !== "cyberAccessProgram",
+            ),
+            {
+              id: "cyberAccessProgram",
+              value: input.daybreakEnabled ? daybreak.enabledValue : "standard",
+            },
+          ],
+        },
+      }
+    : pressed;
+}
+
+export function getModelDaybreakToggleState(model: ModelOption) {
+  return model.providerDriver === "codex" && !model.isUnavailable && model.capabilities
+    ? getCodexDaybreakToggleState(
+        getProviderOptionDescriptors({
+          caps: model.capabilities,
+          selections: model.selection.options,
+        }),
+      )
+    : null;
+}
+
+export function daybreakPickerLabel(models: ReadonlyArray<ModelOption>) {
+  const programs = new Set(
+    models.flatMap((model) => {
+      const state = getModelDaybreakToggleState(model);
+      return state ? [state.enabledValue] : [];
+    }),
+  );
+  return programs.size === 0
+    ? null
+    : programs.size > 1
+      ? "Daybreak"
+      : programs.has("daybreakBlue")
+        ? "Daybreak Blue"
+        : "Daybreak Red";
 }
 
 /** A model can disappear while the picker is open. */

@@ -56,7 +56,10 @@ import type { ModelOption, ProviderGroup } from "../../lib/modelOptions";
 import { applyProviderOptionSelection } from "../../lib/providerOptions";
 import { resolveProviderOptionDescriptors } from "../../lib/providerOptions";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
-import { rememberModelOptions } from "../../state/use-model-option-memory";
+import {
+  rememberModelOptions,
+  withRememberedModelOptions,
+} from "../../state/use-model-option-memory";
 import {
   NativeHeaderToolbar,
   NativeStackScreenOptions,
@@ -86,7 +89,9 @@ import {
 } from "./thread-settings-options";
 import {
   canCommitPendingModel,
+  daybreakPickerLabel,
   favoritesFirst,
+  getModelDaybreakToggleState,
   modelFavoriteKey,
   modelMatchesCatalogQuery,
   pendingModelAfterPress,
@@ -305,6 +310,9 @@ type ThreadSettingsSessionValue = {
   readonly runtimeModeChoices: ReturnType<typeof runtimeModeChoicesForSupportedModes>;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
   readonly displayedDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
+  readonly daybreak: string | null;
+  readonly daybreakEnabled: boolean;
+  readonly setDaybreakEnabled: (enabled: boolean) => void;
   readonly providerExpansionOverrides: ReadonlySet<string>;
   readonly hasLegacyModels: boolean;
   readonly pendingModel: ModelOption | null;
@@ -358,17 +366,39 @@ function ThreadSettingsSessionProvider(
   );
   const [showLegacyToggle, setShowLegacyToggle] = useState(false);
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
+  const [daybreakEnabled, setDaybreakEnabled] = useState(
+    () => getCodexDaybreakToggleState(props.optionDescriptors)?.checked ?? false,
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [providerExpansionOverrides, setProviderExpansionOverrides] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
   const [pendingModel, setPendingModel] = useState<ModelOption | null>(null);
-
   const isApplied = useCallback(
     (option: ModelOption) =>
       option.selection.instanceId === props.selectedModel?.instanceId &&
       option.selection.model === props.selectedModel.model,
     [props.selectedModel],
+  );
+  const daybreak = useMemo(
+    () =>
+      daybreakPickerLabel(
+        props.providerGroups
+          .flatMap((group) => group.models)
+          .filter((option) =>
+            providerFilter === FAVORITES_PROVIDER_FILTER
+              ? favoriteKeys.has(option.key)
+              : option.providerKey === providerFilter,
+          )
+          .map((option) =>
+            pendingModel?.key === option.key
+              ? pendingModel
+              : isApplied(option)
+                ? option
+                : { ...option, selection: withRememberedModelOptions(option.selection) },
+          ),
+      ),
+    [favoriteKeys, isApplied, pendingModel, props.providerGroups, providerFilter],
   );
   // The list highlights the staged pick; Save turns it into the applied one.
   const isDisplayed = useCallback(
@@ -420,6 +450,11 @@ function ThreadSettingsSessionProvider(
         return false;
       }
       void Haptics.selectionAsync();
+      rememberModelOptions(
+        pendingModel.selection.instanceId,
+        pendingModel.selection.model,
+        pendingModel.selection.options ?? [],
+      );
       props.onSelectModel(pendingModel);
     }
     return true;
@@ -460,12 +495,16 @@ function ThreadSettingsSessionProvider(
       setPendingModel((current) =>
         pendingModelAfterPress({
           current,
-          pressed: option,
+          pressed:
+            daybreak && !isApplied(option)
+              ? { ...option, selection: withRememberedModelOptions(option.selection) }
+              : option,
           pressedIsApplied: isApplied(option),
+          ...(daybreak ? { daybreakEnabled } : {}),
         }),
       );
     },
-    [isApplied],
+    [daybreak, daybreakEnabled, isApplied],
   );
 
   const value = useMemo<ThreadSettingsSessionValue>(
@@ -477,6 +516,9 @@ function ThreadSettingsSessionProvider(
       runtimeModeChoices,
       onUpdateRuntimeMode: props.onUpdateRuntimeMode,
       displayedDescriptors,
+      daybreak,
+      daybreakEnabled: daybreak !== null && daybreakEnabled,
+      setDaybreakEnabled,
       favoriteKeys,
       favoritesLoaded,
       providerExpansionOverrides,
@@ -501,6 +543,8 @@ function ThreadSettingsSessionProvider(
       commitPendingModel,
       compatibleRuntimeMode,
       displayedDescriptors,
+      daybreak,
+      daybreakEnabled,
       favoriteKeys,
       favoritesLoaded,
       providerExpansionOverrides,
@@ -643,6 +687,7 @@ function useThreadSettingsCatalogItems(
         const visibleModels = favoritesFirst(
           catalogModels.filter(
             (model) =>
+              (!session.daybreakEnabled || getModelDaybreakToggleState(model) !== null) &&
               (session.providerFilter !== FAVORITES_PROVIDER_FILTER ||
                 session.favoriteKeys.has(model.key)) &&
               modelMatchesCatalogQuery({
@@ -695,6 +740,7 @@ function useThreadSettingsCatalogItems(
       }),
     [
       session.isApplied,
+      session.daybreakEnabled,
       session.isDisplayed,
       session.favoriteKeys,
       session.providerExpansionOverrides,
@@ -712,7 +758,6 @@ function ThreadSettingsOptionsItem(props: {
 }) {
   const insets = useSafeAreaInsets();
   const session = useThreadSettingsSession();
-  const daybreak = getCodexDaybreakToggleState(session.displayedDescriptors);
   const configs = useAtomValue(environmentServerConfigsAtom);
   const selectedProvider = session.environmentId
     ? (configs
@@ -734,28 +779,7 @@ function ThreadSettingsOptionsItem(props: {
       >
         {session.displayedDescriptors.map((descriptor) => {
           if (descriptor.id === "cyberAccessProgram") {
-            if (!daybreak) return null;
-            return (
-              <Animated.View
-                key={descriptor.id}
-                entering={
-                  props.animationsReady ? THREAD_SETTINGS_OPTION_ENTER_TRANSITION : undefined
-                }
-                exiting={props.animationsReady ? THREAD_SETTINGS_OPTION_EXIT_TRANSITION : undefined}
-                layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}
-              >
-                <SwitchRow
-                  label={descriptor.label}
-                  value={daybreak.checked}
-                  onValueChange={(value) =>
-                    session.applyOptionChange(
-                      descriptor.id,
-                      value ? daybreak.enabledValue : "standard",
-                    )
-                  }
-                />
-              </Animated.View>
-            );
+            return null;
           }
           if (descriptor.type === "select") {
             return (
@@ -934,6 +958,16 @@ function ThreadSettingsMainContent(props: {
       maintainVisibleContentPosition={THREAD_SETTINGS_MAINTAIN_VISIBLE_CONTENT_POSITION}
       ListHeaderComponent={
         <>
+          {session.daybreak ? (
+            <View className="mx-4 overflow-hidden rounded-2xl bg-grouped-card">
+              <SwitchRow
+                isLast
+                label={session.daybreak}
+                value={session.daybreakEnabled}
+                onValueChange={session.setDaybreakEnabled}
+              />
+            </View>
+          ) : null}
           {Platform.OS === "android" ? (
             <View className="px-4 pb-2 pt-3">
               <View

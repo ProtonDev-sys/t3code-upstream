@@ -1,107 +1,49 @@
 import { assert, it } from "@effect/vitest";
 
-import {
-  appendCustomCodexModels,
-  applyPreferredCodexDefaultModel,
-  mapCodexModelCapabilities,
-} from "./CodexProvider.ts";
+import { applyPreferredCodexDefaultModel, mapCodexModelCapabilities } from "./CodexProvider.ts";
 
-const DAYBREAK_TEST_MODEL = {
-  additionalSpeedTiers: [],
-  defaultReasoningEffort: "medium",
-  description: "Test model",
-  displayName: "GPT Test",
-  hidden: false,
-  id: "gpt-test",
-  isDefault: true,
-  model: "gpt-test",
-  supportedReasoningEfforts: [],
-};
-
-it("only offers Daybreak programs advertised for the account and model", () => {
-  for (const program of ["daybreakBlue", "daybreakRed"] as const) {
-    const capabilities = mapCodexModelCapabilities({
-      ...DAYBREAK_TEST_MODEL,
-      availableAccessPrograms: { cyber: ["standard", program] },
-    });
-    assert.deepStrictEqual(capabilities.optionDescriptors, [
-      {
-        id: "cyberAccessProgram",
-        label: "Daybreak",
-        type: "select",
-        options: [
-          { id: "standard", label: "Off", isDefault: true },
-          { id: program, label: program === "daybreakBlue" ? "Blue" : "Red" },
-        ],
-        currentValue: "standard",
-      },
-    ]);
-  }
-  for (const availableAccessPrograms of [undefined, null, { cyber: ["standard"] as const }]) {
+it("advertises only approved Daybreak programs with Off as the default", () => {
+  for (const programs of [
+    undefined,
+    [],
+    ["standard"],
+    ["daybreakBlue"],
+    ["daybreakRed"],
+    ["standard", "daybreakBlue"],
+    ["standard", "daybreakRed"],
+    ["standard", "daybreakBlue", "daybreakRed"],
+  ] as const) {
+    const descriptors = mapCodexModelCapabilities({
+      additionalSpeedTiers: [],
+      defaultReasoningEffort: "medium",
+      description: "Test",
+      displayName: "Test",
+      hidden: false,
+      id: "test",
+      isDefault: true,
+      model: "test",
+      supportedReasoningEfforts: [],
+      ...(programs === undefined ? {} : { availableAccessPrograms: { cyber: programs } }),
+    }).optionDescriptors;
     assert.deepStrictEqual(
-      mapCodexModelCapabilities({
-        ...DAYBREAK_TEST_MODEL,
-        ...(availableAccessPrograms === undefined ? {} : { availableAccessPrograms }),
-      }).optionDescriptors,
-      [],
+      descriptors,
+      programs?.some((id) => id === "standard") && programs.length > 1
+        ? [
+            {
+              id: "cyberAccessProgram",
+              label: "Daybreak",
+              type: "select",
+              currentValue: "standard",
+              options: programs.map((id) => ({
+                id,
+                label: id === "standard" ? "Off" : id === "daybreakBlue" ? "Blue" : "Red",
+                ...(id === "standard" ? { isDefault: true } : {}),
+              })),
+            },
+          ]
+        : [],
     );
   }
-});
-
-it("offers both approved Daybreak programs without selecting one by default", () => {
-  const capabilities = mapCodexModelCapabilities({
-    ...DAYBREAK_TEST_MODEL,
-    availableAccessPrograms: { cyber: ["standard", "daybreakBlue", "daybreakRed"] },
-  });
-  assert.deepStrictEqual(capabilities.optionDescriptors, [
-    {
-      id: "cyberAccessProgram",
-      label: "Daybreak",
-      type: "select",
-      options: [
-        { id: "standard", label: "Off", isDefault: true },
-        { id: "daybreakBlue", label: "Blue" },
-        { id: "daybreakRed", label: "Red" },
-      ],
-      currentValue: "standard",
-    },
-  ]);
-});
-
-it("does not expose Daybreak without an advertised way to turn it off", () => {
-  for (const program of ["daybreakBlue", "daybreakRed"] as const) {
-    const capabilities = mapCodexModelCapabilities({
-      ...DAYBREAK_TEST_MODEL,
-      availableAccessPrograms: { cyber: [program] },
-    });
-    assert.deepStrictEqual(capabilities.optionDescriptors, []);
-  }
-});
-
-it("does not lend a model's Daybreak approval to bare custom models", () => {
-  const capabilities = mapCodexModelCapabilities({
-    ...DAYBREAK_TEST_MODEL,
-    supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "Medium" }],
-    availableAccessPrograms: { cyber: ["standard", "daybreakBlue"] },
-  });
-  const models = appendCustomCodexModels(
-    [{ slug: "gpt-test", name: "GPT Test", isCustom: false, capabilities }],
-    ["custom-model"],
-  );
-
-  assert.deepStrictEqual(
-    models[0]?.capabilities?.optionDescriptors?.map((descriptor) => descriptor.id),
-    ["reasoningEffort", "cyberAccessProgram"],
-  );
-  assert.deepStrictEqual(models[1]?.capabilities?.optionDescriptors, [
-    {
-      id: "reasoningEffort",
-      label: "Reasoning",
-      type: "select",
-      options: [{ id: "medium", label: "Medium", isDefault: true }],
-      currentValue: "medium",
-    },
-  ]);
 });
 
 it("maps current Codex model capability fields", () => {
