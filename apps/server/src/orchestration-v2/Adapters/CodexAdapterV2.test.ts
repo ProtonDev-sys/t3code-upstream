@@ -400,6 +400,68 @@ describe("CodexAdapterV2 assistant message streaming", () => {
 });
 
 describe("CodexAdapterV2 runtime policy", () => {
+  it.effect("forwards explicit Daybreak and off choices alongside other model options", () =>
+    Effect.gen(function* () {
+      const instanceId = ProviderInstanceId.make("codex-secondary");
+      for (const program of ["standard", "daybreakBlue", "daybreakRed"]) {
+        const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+          nativeThreadId: "native-daybreak",
+          codexInput: [{ type: "text", text: "test" }],
+          runtimePolicy: {
+            runtimeMode: "full-access",
+            interactionMode: "plan",
+            cwd: "/workspace/daybreak",
+          },
+          providerInstanceId: instanceId,
+          modelSelection: {
+            instanceId,
+            model: "gpt-6-sol",
+            options: [
+              { id: "reasoningEffort", value: "high" },
+              { id: "serviceTier", value: "priority" },
+              { id: "cyberAccessProgram", value: program },
+            ],
+          },
+        });
+
+        assert.equal(params.cyberAccessProgram, program);
+        assert.equal(params.model, "gpt-6-sol");
+        assert.equal(params.effort, "high");
+        assert.equal(params.serviceTier, "priority");
+        assert.equal(params.cwd, "/workspace/daybreak");
+        assert.equal(params.collaborationMode?.settings.reasoning_effort, "high");
+      }
+    }),
+  );
+
+  it.effect("omits absent, invalid and other-account Daybreak choices", () =>
+    Effect.gen(function* () {
+      const instanceId = ProviderInstanceId.make("codex");
+      for (const modelSelection of [
+        { instanceId, model: "gpt-6-sol" },
+        {
+          instanceId,
+          model: "gpt-6-sol",
+          options: [{ id: "cyberAccessProgram", value: "invalid" }],
+        },
+        {
+          instanceId: ProviderInstanceId.make("other-codex-account"),
+          model: "gpt-6-sol",
+          options: [{ id: "cyberAccessProgram", value: "daybreakBlue" }],
+        },
+      ]) {
+        const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+          nativeThreadId: "native-daybreak",
+          codexInput: [{ type: "text", text: "test" }],
+          runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: null },
+          providerInstanceId: instanceId,
+          modelSelection,
+        });
+        assert.notProperty(params, "cyberAccessProgram");
+      }
+    }),
+  );
+
   it.effect("derives concrete Codex turn policies from every T3 runtime mode", () =>
     Effect.gen(function* () {
       const build = (
@@ -1727,6 +1789,153 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         firstTerminal: Deferred.await(firstTerminal),
       };
     });
+
+  for (const account of ["bound", "other"] as const) {
+    it.effect(
+      `uses the ${account} account's Daybreak choice on turns before and after resume`,
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const nativeThreadId = `daybreak-${account}-thread`;
+            const instanceId =
+              account === "bound"
+                ? CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID
+                : ProviderInstanceId.make("other-codex-account");
+            const modelSelection = (program: string): ModelSelection => ({
+              instanceId,
+              model: "gpt-6-sol",
+              options: [
+                { id: "reasoningEffort", value: "high" },
+                { id: "serviceTier", value: "priority" },
+                { id: "cyberAccessProgram", value: program },
+              ],
+            });
+            const turnEntries = (
+              requestId: number,
+              nativeTurnId: string,
+              program: string,
+            ): Array<CodexReplay.CodexAppServerReplayEntry> => [
+              {
+                type: "expect_outbound",
+                label: `turn/start/${program}`,
+                frame: {
+                  id: requestId,
+                  method: "turn/start",
+                  params: {
+                    threadId: nativeThreadId,
+                    input: [{ type: "text", text: program }],
+                    cwd: "/workspace",
+                    model: "gpt-6-sol",
+                    effort: "high",
+                    serviceTier: "priority",
+                    approvalPolicy: "never",
+                    approvalsReviewer: "user",
+                    sandboxPolicy: { type: "dangerFullAccess" },
+                    summary: "detailed",
+                    ...(account === "bound" ? { cyberAccessProgram: program } : {}),
+                  },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: `turn/start/${program}`,
+                frame: {
+                  id: requestId,
+                  result: { turn: makeCodexReplayTurn({ id: nativeTurnId, status: "inProgress" }) },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: `turn/completed/${program}`,
+                frame: {
+                  method: "turn/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+                  },
+                },
+              },
+            ];
+            const transcript = makeCodexReplayTranscript({
+              scenario: `daybreak-${account}-resume`,
+              entries: [
+                ...codexReplayPreamble({
+                  nativeThreadId,
+                  nativeTurnId: "unused",
+                  prompt: "unused",
+                }).slice(0, 5),
+                ...turnEntries(3, "daybreak-enabled-turn", "daybreakBlue"),
+                {
+                  type: "expect_outbound",
+                  label: "thread/resume",
+                  frame: {
+                    id: 4,
+                    method: "thread/resume",
+                    params: {
+                      threadId: nativeThreadId,
+                      excludeTurns: true,
+                      model: "gpt-6-sol",
+                      cwd: "/workspace",
+                      config: CodexAdapterV2.CODEX_THREAD_CONFIG,
+                    },
+                  },
+                },
+                {
+                  type: "emit_inbound",
+                  label: "thread/resume",
+                  frame: {
+                    id: 4,
+                    result: { thread: { id: nativeThreadId, updatedAt: 1782622450 } },
+                  },
+                },
+                ...turnEntries(5, "daybreak-off-turn", "standard"),
+              ],
+            });
+            const bothTerminal = yield* Deferred.make<void>();
+            let terminalCount = 0;
+            const harness = yield* makeCodexReplayHarness(transcript, (event) =>
+              event.type === "turn.terminal" && ++terminalCount === 2
+                ? Deferred.succeed(bothTerminal, undefined)
+                : Effect.void,
+            );
+            yield* harness.runtime.startTurn({
+              ...makeCodexTestTurnInput({
+                threadId: harness.threadId,
+                providerThread: harness.providerThread,
+                now: yield* DateTime.now,
+                attemptId: RunAttemptId.make("daybreak-enabled-attempt"),
+                text: "daybreakBlue",
+              }),
+              modelSelection: modelSelection("daybreakBlue"),
+            });
+            yield* harness.firstTerminal;
+            const resumedThread = yield* harness.runtime.resumeThread({
+              providerThread: harness.providerThread,
+              modelSelection: modelSelection("standard"),
+              runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+            });
+            yield* harness.runtime.startTurn({
+              ...makeCodexTestTurnInput({
+                threadId: harness.threadId,
+                providerThread: resumedThread,
+                now: yield* DateTime.now,
+                attemptId: RunAttemptId.make("daybreak-off-attempt"),
+                text: "standard",
+              }),
+              runOrdinal: 2,
+              providerTurnOrdinal: 2,
+              modelSelection: modelSelection("standard"),
+            });
+            yield* Deferred.await(bothTerminal);
+            assert.equal(
+              resumedThread.providerInstanceId,
+              CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+            );
+            assert.equal(harness.terminalEvents().length, 2);
+          }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+        ),
+    );
+  }
 
   for (const response of ["supported", "unsupported", "invalid"] as const) {
     it.effect(`delivers native history with ${response} app-server protocol`, () =>

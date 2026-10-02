@@ -30,6 +30,58 @@ const CODEX_CAPABILITIES: ModelCapabilities = {
 };
 
 describe("mobile provider options", () => {
+  it("changes reasoning and Daybreak independently using the selected model's descriptors", () => {
+    const capabilities: ModelCapabilities = {
+      optionDescriptors: [
+        ...(CODEX_CAPABILITIES.optionDescriptors ?? []),
+        {
+          id: "cyberAccessProgram",
+          label: "Daybreak",
+          type: "select",
+          options: [
+            { id: "standard", label: "Off", isDefault: true },
+            { id: "daybreakBlue", label: "Blue" },
+          ],
+          currentValue: "standard",
+        },
+      ],
+    };
+    const descriptors = resolveProviderOptionDescriptors({
+      capabilities,
+      selections: [{ id: "cyberAccessProgram", value: "daybreakBlue" }],
+    });
+
+    expect(
+      applyProviderOptionSelection(descriptors, { id: "reasoningEffort", value: "high" }),
+    ).toEqual([
+      { id: "reasoningEffort", value: "high" },
+      { id: "serviceTier", value: "default" },
+      { id: "cyberAccessProgram", value: "daybreakBlue" },
+    ]);
+    expect(
+      applyProviderOptionSelection(descriptors, { id: "cyberAccessProgram", value: "standard" }),
+    ).toEqual([
+      { id: "reasoningEffort", value: "medium" },
+      { id: "serviceTier", value: "default" },
+      { id: "cyberAccessProgram", value: "standard" },
+    ]);
+    expect(
+      applyProviderOptionSelection(descriptors, { id: "cyberAccessProgram", value: "daybreakRed" }),
+    ).toBeNull();
+
+    const withoutAccess = resolveProviderOptionDescriptors({
+      capabilities: CODEX_CAPABILITIES,
+      selections: [{ id: "cyberAccessProgram", value: "daybreakBlue" }],
+    });
+    expect(withoutAccess.some((descriptor) => descriptor.id === "cyberAccessProgram")).toBe(false);
+    expect(
+      applyProviderOptionSelection(withoutAccess, {
+        id: "cyberAccessProgram",
+        value: "daybreakBlue",
+      }),
+    ).toBeNull();
+  });
+
   it("updates generic select options without knowing provider-specific ids", () => {
     const descriptors = resolveProviderOptionDescriptors({
       capabilities: CODEX_CAPABILITIES,

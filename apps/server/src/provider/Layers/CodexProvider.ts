@@ -217,6 +217,24 @@ export function mapCodexModelCapabilities(
     });
   }
 
+  const cyberPrograms = model.availableAccessPrograms?.cyber ?? [];
+  if (
+    cyberPrograms.includes("standard") &&
+    cyberPrograms.some((program) => program !== "standard")
+  ) {
+    optionDescriptors.push({
+      id: "cyberAccessProgram",
+      label: "Daybreak",
+      type: "select",
+      options: cyberPrograms.map((program) => ({
+        id: program,
+        label: program === "standard" ? "Off" : program === "daybreakBlue" ? "Blue" : "Red",
+        ...(program === "standard" ? { isDefault: true } : {}),
+      })),
+      currentValue: "standard",
+    });
+  }
+
   return createModelCapabilities({
     optionDescriptors,
   });
@@ -264,7 +282,7 @@ export function applyPreferredCodexDefaultModel(
  * the first built-in's descriptors; an entry with its own capabilities keeps
  * them.
  */
-function appendCustomCodexModels(
+export function appendCustomCodexModels(
   models: ReadonlyArray<ServerProviderModel>,
   customModels: ReadonlyArray<CustomModelSetting>,
 ): ReadonlyArray<ServerProviderModel> {
@@ -273,7 +291,20 @@ function appendCustomCodexModels(
   }
 
   const seen = new Set(models.map((model) => model.slug));
-  const fallbackCapabilities = models.find((model) => model.capabilities)?.capabilities ?? null;
+  const firstCapabilities = models.find((model) => model.capabilities)?.capabilities;
+  // Access programs are advertised per model and cannot be borrowed by a custom slug.
+  const fallbackCapabilities = firstCapabilities
+    ? {
+        ...firstCapabilities,
+        ...(firstCapabilities.optionDescriptors
+          ? {
+              optionDescriptors: firstCapabilities.optionDescriptors.filter(
+                (descriptor) => descriptor.id !== "cyberAccessProgram",
+              ),
+            }
+          : {}),
+      }
+    : null;
   const customEntries: ServerProviderModel[] = [];
   for (const entry of readCustomModelEntries(customModels)) {
     if (seen.has(entry.slug)) {

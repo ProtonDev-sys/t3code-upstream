@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ProviderDriverKind, type ProviderOptionDescriptor } from "@t3tools/contracts";
-import { buildTraitsTriggerDisplay, buildUnavailableModelOptionDescriptors } from "./TraitsPicker";
+import {
+  buildTraitsTriggerDisplay,
+  buildUnavailableModelOptionDescriptors,
+  shouldRenderTraitsControls,
+} from "./TraitsPicker";
 
 function selectDescriptor(
   id: string,
@@ -52,6 +56,18 @@ const CONTEXT_WINDOW = selectDescriptor(
 
 const CODEX = ProviderDriverKind.make("codex");
 
+function daybreakDescriptor(currentValue: "standard" | "daybreakBlue" | "daybreakRed") {
+  return selectDescriptor(
+    "cyberAccessProgram",
+    [
+      { id: "standard", label: "Off", isDefault: true },
+      { id: "daybreakBlue", label: "Blue" },
+      { id: "daybreakRed", label: "Red" },
+    ],
+    currentValue,
+  );
+}
+
 function display(descriptors: ReadonlyArray<ProviderOptionDescriptor>) {
   return buildTraitsTriggerDisplay({
     provider: CODEX,
@@ -62,6 +78,32 @@ function display(descriptors: ReadonlyArray<ProviderOptionDescriptor>) {
 }
 
 describe("buildTraitsTriggerDisplay", () => {
+  it("omits Daybreak from the trigger when it is off", () => {
+    expect(display([EFFORT, daybreakDescriptor("standard")])).toEqual({
+      label: "High",
+      speedIcon: null,
+    });
+  });
+
+  it("keeps a Daybreak-only trigger readable while off", () => {
+    expect(display([daybreakDescriptor("standard")])).toEqual({
+      label: "Daybreak",
+      speedIcon: null,
+    });
+  });
+
+  it.each([
+    ["daybreakBlue", "Daybreak Blue"],
+    ["daybreakRed", "Daybreak Red"],
+  ] as const)("labels active %s separately from reasoning and speed", (program, label) => {
+    expect(
+      display([EFFORT, serviceTierDescriptor("priority"), daybreakDescriptor(program)]),
+    ).toEqual({
+      label: `High · ${label}`,
+      speedIcon: "fast",
+    });
+  });
+
   it("omits fast mode from the label entirely when it is off", () => {
     expect(display([EFFORT, fastModeDescriptor(false), CONTEXT_WINDOW])).toEqual({
       label: "High · 1M",
@@ -197,6 +239,28 @@ describe("buildTraitsTriggerDisplay", () => {
         ultrathinkPromptControlled: true,
       }),
     ).toEqual({ label: "Ultrathink", speedIcon: "fast" });
+  });
+});
+
+describe("shouldRenderTraitsControls", () => {
+  it("keeps Daybreak selectable when the model advertises no reasoning choices", () => {
+    expect(
+      shouldRenderTraitsControls({
+        provider: CODEX,
+        models: [
+          {
+            slug: "daybreak-model",
+            name: "Daybreak Model",
+            isCustom: false,
+            capabilities: { optionDescriptors: [daybreakDescriptor("standard")] },
+          },
+        ],
+        model: "daybreak-model",
+        prompt: "",
+        modelOptions: undefined,
+        planModeEnabled: true,
+      }),
+    ).toBe(true);
   });
 });
 

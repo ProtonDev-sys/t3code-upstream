@@ -73,6 +73,79 @@ const ULTRATHINK_FRAME_CLASSES = {
 } as const;
 
 describe("getComposerProviderState", () => {
+  it("keeps Daybreak separate from the primary reasoning option", () => {
+    const state = getComposerProviderState({
+      provider: PROVIDER,
+      model: MODEL,
+      models: modelWith([
+        selectDescriptor("cyberAccessProgram", [
+          { id: "standard", label: "Off", isDefault: true },
+          { id: "daybreakBlue", label: "Blue" },
+        ]),
+        selectDescriptor("reasoningEffort", [{ id: "high", label: "High", isDefault: true }]),
+      ]),
+      modelOptions: selections(["cyberAccessProgram", "daybreakBlue"]),
+      planModeEnabled: true,
+    });
+
+    expect(state.promptEffort).toBe("high");
+    expect(state.modelOptionsForDispatch).toEqual(
+      selections(["cyberAccessProgram", "daybreakBlue"]),
+    );
+  });
+
+  it("does not use Daybreak as prompt effort when reasoning choices are absent", () => {
+    const state = getComposerProviderState({
+      provider: PROVIDER,
+      model: MODEL,
+      models: modelWith([
+        selectDescriptor("cyberAccessProgram", [
+          { id: "standard", label: "Off", isDefault: true },
+          { id: "daybreakRed", label: "Red" },
+        ]),
+      ]),
+      modelOptions: selections(["cyberAccessProgram", "daybreakRed"]),
+      planModeEnabled: true,
+    });
+
+    expect(state.promptEffort).toBeNull();
+    expect(state.modelOptionsForDispatch).toEqual(
+      selections(["cyberAccessProgram", "daybreakRed"]),
+    );
+  });
+
+  it("turns off a saved Daybreak program when the model stops advertising it", () => {
+    const state = getComposerProviderState({
+      provider: PROVIDER,
+      model: MODEL,
+      models: modelWith([
+        selectDescriptor("cyberAccessProgram", [
+          { id: "standard", label: "Off", isDefault: true },
+          { id: "daybreakRed", label: "Red" },
+        ]),
+      ]),
+      modelOptions: selections(["cyberAccessProgram", "daybreakBlue"]),
+      planModeEnabled: true,
+    });
+
+    expect(state.modelOptionsForDispatch).toEqual(selections(["cyberAccessProgram", "standard"]));
+  });
+
+  it("drops Daybreak when access is revoked without changing reasoning", () => {
+    const state = getComposerProviderState({
+      provider: PROVIDER,
+      model: MODEL,
+      models: modelWith([
+        selectDescriptor("reasoningEffort", [{ id: "high", label: "High", isDefault: true }]),
+      ]),
+      modelOptions: selections(["reasoningEffort", "high"], ["cyberAccessProgram", "daybreakBlue"]),
+      planModeEnabled: true,
+    });
+
+    expect(state.promptEffort).toBe("high");
+    expect(state.modelOptionsForDispatch).toEqual(selections(["reasoningEffort", "high"]));
+  });
+
   it("derives a stable prompt injection state for ordinary prompt edits", () => {
     expect(getComposerPromptInjectionState("Investigate this failure")).toBe("none");
     expect(getComposerPromptInjectionState("Ultrathink:\nInvestigate this failure")).toBe(
