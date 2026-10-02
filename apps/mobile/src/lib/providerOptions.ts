@@ -29,6 +29,7 @@ export function resolveProviderOptionDescriptors(input: {
 export function applyProviderOptionSelection(
   descriptors: ReadonlyArray<ProviderOptionDescriptor>,
   change: ProviderOptionSelection,
+  previousSelections?: ReadonlyArray<ProviderOptionSelection>,
 ): ReadonlyArray<ProviderOptionSelection> | null {
   const descriptor = descriptors.find((candidate) => candidate.id === change.id);
   if (!descriptor) {
@@ -52,5 +53,13 @@ export function applyProviderOptionSelection(
       : candidate,
   ) as ReadonlyArray<ProviderOptionDescriptor>;
 
-  return buildProviderOptionSelectionsFromDescriptors(nextDescriptors) ?? [];
+  const selections = buildProviderOptionSelectionsFromDescriptors(nextDescriptors) ?? [];
+  // Keep an explicit Off after switching to a model with no Daybreak control.
+  // Omitting it would let Codex preserve the session's automatic behavior.
+  const explicitOff = previousSelections?.find(
+    (option) => option.id === "cyberAccessProgram" && option.value === "standard",
+  );
+  return explicitOff && !selections.some((option) => option.id === "cyberAccessProgram")
+    ? [...selections, explicitOff]
+    : selections;
 }

@@ -7,6 +7,7 @@ import {
   groupByProvider,
   isModelSelectionUnavailable,
   resolveDefaultableModelSelection,
+  resolveModelOptionChange,
   resolveNewTaskModelSelection,
   resolveSelectableModelSelection,
   type ModelOption,
@@ -500,6 +501,233 @@ describe("mobile model options", () => {
         projectDefaultSelection: null,
         stickySelection: null,
         modelOptions: [unavailable],
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("mobile Daybreak model changes", () => {
+  function option(
+    instanceId: string,
+    model: string,
+    programs: ReadonlyArray<"daybreakBlue" | "daybreakRed"> = [],
+  ): ModelOption {
+    return {
+      key: `${instanceId}:${model}`,
+      label: model,
+      subtitle: "",
+      providerKey: instanceId,
+      providerLabel: instanceId,
+      providerDriver: "codex",
+      isDefault: false,
+      isLegacy: false,
+      capabilities: {
+        optionDescriptors: programs.length
+          ? [
+              {
+                id: "cyberAccessProgram",
+                label: "Daybreak",
+                type: "select",
+                options: [
+                  { id: "automatic", label: "Auto", isDefault: true },
+                  { id: "standard", label: "Off" },
+                  ...programs.map((id) => ({ id, label: id })),
+                ],
+              },
+            ]
+          : [],
+      },
+      selection: {
+        instanceId: ProviderInstanceId.make(instanceId),
+        model,
+        options: [{ id: "reasoningEffort", value: "high" }],
+      },
+    };
+  }
+
+  const current: ModelSelection = {
+    instanceId: ProviderInstanceId.make("codex-work"),
+    model: "gpt-current",
+    options: [
+      { id: "reasoningEffort", value: "medium" },
+      { id: "serviceTier", value: "priority" },
+      { id: "cyberAccessProgram", value: "daybreakBlue" },
+    ],
+  };
+
+  it("keeps both capable and incapable models in the catalog while Daybreak is enabled", () => {
+    const capable = option("codex-work", "gpt-current", ["daybreakBlue"]);
+    const incapable = option("codex-work", "gpt-other");
+    const config = {
+      providers: [
+        {
+          instanceId: current.instanceId,
+          driver: "codex",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          models: [capable, incapable].map((entry) => ({
+            slug: entry.selection.model,
+            name: entry.label,
+            isCustom: false,
+            capabilities: entry.capabilities,
+          })),
+        },
+      ],
+    } as unknown as ServerConfig;
+
+    expect(buildModelOptions(config, current).map((entry) => entry.selection.model)).toEqual([
+      "gpt-current",
+      "gpt-other",
+    ]);
+    expect(buildModelOptions(config, null).map((entry) => entry.selection.options)).toEqual([
+      undefined,
+      undefined,
+    ]);
+    const resumed = buildModelOptions(config, {
+      instanceId: current.instanceId,
+      model: current.model,
+    });
+    expect(resumed[0]?.selection.options).toBeUndefined();
+    const explicitlyOff = buildModelOptions(config, {
+      instanceId: current.instanceId,
+      model: "gpt-other",
+      options: [{ id: "cyberAccessProgram", value: "standard" }],
+    });
+    expect(explicitlyOff[1]?.selection.options).toEqual([
+      { id: "cyberAccessProgram", value: "standard" },
+    ]);
+  });
+
+  it("Cancel preserves the complete current selection without staging the destination", async () => {
+    const original = structuredClone(current);
+    const destination = option("codex-work", "gpt-unsupported");
+    let selected = current;
+    const next = await resolveModelOptionChange({
+      currentSelection: selected,
+      option: destination,
+      confirmDaybreakOff: async () => false,
+    });
+    if (next) selected = next.selection;
+
+    expect(next).toBeNull();
+    expect(selected).toBe(current);
+    expect(current).toEqual(original);
+    expect(destination.selection.options).toEqual([{ id: "reasoningEffort", value: "high" }]);
+  });
+
+  it("OK switches models and explicitly turns Daybreak off while retaining other destination options", async () => {
+    const next = await resolveModelOptionChange({
+      currentSelection: current,
+      option: option("codex-work", "gpt-unsupported"),
+      confirmDaybreakOff: async () => true,
+    });
+
+    expect(next?.selection).toEqual({
+      instanceId: ProviderInstanceId.make("codex-work"),
+      model: "gpt-unsupported",
+      options: [
+        { id: "reasoningEffort", value: "high" },
+        { id: "cyberAccessProgram", value: "standard" },
+      ],
+    });
+  });
+
+  it("checks the destination account even when the model slug is unchanged", async () => {
+    expect(
+      await resolveModelOptionChange({
+        currentSelection: current,
+        option: option("codex-personal", current.model),
+        confirmDaybreakOff: async () => false,
+      }),
+    ).toBeNull();
+  });
+
+  it.each(["daybreakBlue", "daybreakRed"] as const)(
+    "preserves %s only when the destination account and model advertise it",
+    async (program) => {
+      const next = await resolveModelOptionChange({
+        currentSelection: { ...current, options: [{ id: "cyberAccessProgram", value: program }] },
+        option: option("codex-personal", "gpt-other", [program]),
+        confirmDaybreakOff: async () => {
+          throw new Error("A supported program must not require confirmation");
+        },
+      });
+      expect(next?.selection).toEqual({
+        instanceId: ProviderInstanceId.make("codex-personal"),
+        model: "gpt-other",
+        options: [
+          { id: "reasoningEffort", value: "high" },
+          { id: "cyberAccessProgram", value: program },
+        ],
+      });
+    },
+  );
+
+  it("does not silently replace Blue with Red on a Red-only destination", async () => {
+    const next = await resolveModelOptionChange({
+      currentSelection: current,
+      option: option("codex-work", "gpt-red", ["daybreakRed"]),
+      confirmDaybreakOff: async () => true,
+    });
+    expect(next?.selection.options).toContainEqual({ id: "cyberAccessProgram", value: "standard" });
+  });
+
+  it.each([
+    {
+      label: "Off",
+      value: "standard",
+      expected: [{ id: "cyberAccessProgram", value: "standard" }],
+    },
+    { label: "Auto", value: "automatic", expected: [] },
+    { label: "unset", value: undefined, expected: [] },
+  ])(
+    "does not restore remembered Daybreak while the current mode is $label",
+    async ({ value, expected }) => {
+      const destination = option("codex-work", "gpt-other", ["daybreakBlue"]);
+      const next = await resolveModelOptionChange({
+        currentSelection: {
+          ...current,
+          options: value ? [{ id: "cyberAccessProgram", value }] : [],
+        },
+        option: {
+          ...destination,
+          selection: {
+            ...destination.selection,
+            options: [
+              ...destination.selection.options!,
+              { id: "cyberAccessProgram", value: "daybreakBlue" },
+            ],
+          },
+        },
+        confirmDaybreakOff: async () => {
+          throw new Error("An inactive Daybreak program does not need confirmation");
+        },
+      });
+      expect(next?.selection.options).toEqual([
+        { id: "reasoningEffort", value: "high" },
+        ...expected,
+      ]);
+    },
+  );
+
+  it("clears the provider-specific option when switching away from Codex", async () => {
+    const destination = option("claude", "claude-model");
+    const next = await resolveModelOptionChange({
+      currentSelection: current,
+      option: { ...destination, providerDriver: "claudeAgent" },
+      confirmDaybreakOff: async () => true,
+    });
+    expect(next?.selection.options).toEqual([{ id: "reasoningEffort", value: "high" }]);
+  });
+
+  it("checks capability loss again when committing the same staged model", async () => {
+    const destination = option("codex-work", current.model);
+    expect(
+      await resolveModelOptionChange({
+        currentSelection: current,
+        option: { ...destination, selection: current },
+        confirmDaybreakOff: async () => false,
       }),
     ).toBeNull();
   });

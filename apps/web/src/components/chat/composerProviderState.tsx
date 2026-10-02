@@ -96,7 +96,10 @@ function resolveComposerOptionSelections(
   selections: ReadonlyArray<ProviderOptionSelection> | undefined;
 } {
   const caps = getProviderModelCapabilities(models, model, provider, planModeEnabled);
-  return { caps, selections: withImplicitFastModeDefault(caps, modelOptions) };
+  return {
+    caps,
+    selections: withImplicitFastModeDefault(caps, modelOptions),
+  };
 }
 
 export function getComposerProviderState(input: ComposerProviderStateInput): ComposerProviderState {
@@ -133,7 +136,7 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
   const descriptors = getProviderOptionDescriptors({ caps, selections });
   const primarySelectDescriptor = descriptors.find(
     (descriptor): descriptor is Extract<(typeof descriptors)[number], { type: "select" }> =>
-      descriptor.type === "select",
+      descriptor.type === "select" && descriptor.id !== "cyberAccessProgram",
   );
   const primaryValue = getProviderOptionCurrentValue(primarySelectDescriptor ?? null);
   const promptEffort = typeof primaryValue === "string" ? primaryValue : null;
@@ -141,13 +144,35 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
     (primarySelectDescriptor?.promptInjectedValues?.length ?? 0) > 0 &&
     promptInjectionState === "ultrathink";
 
+  let modelOptionsForDispatch = buildExplicitProviderOptionSelectionsFromDescriptors(
+    descriptors,
+    selections,
+  );
+  if (provider === "codex") {
+    const withoutAutomatic = modelOptionsForDispatch?.filter(
+      (option) => option.id !== "cyberAccessProgram" || option.value !== "automatic",
+    );
+    modelOptionsForDispatch = withoutAutomatic?.length ? withoutAutomatic : undefined;
+  }
+  // Explicit Off must reset a prior Codex turn even after switching to a model
+  // without a Daybreak descriptor; omitting the option preserves automatic behavior.
+  if (
+    provider === "codex" &&
+    selections?.some(
+      (option) => option.id === "cyberAccessProgram" && option.value === "standard",
+    ) &&
+    !modelOptionsForDispatch?.some((option) => option.id === "cyberAccessProgram")
+  ) {
+    modelOptionsForDispatch = [
+      ...(modelOptionsForDispatch ?? []),
+      { id: "cyberAccessProgram", value: "standard" },
+    ];
+  }
+
   return {
     provider,
     promptEffort,
-    modelOptionsForDispatch: buildExplicitProviderOptionSelectionsFromDescriptors(
-      descriptors,
-      selections,
-    ),
+    modelOptionsForDispatch,
     ...(ultrathinkActive
       ? {
           composerFrameClassName: "ultrathink-frame",

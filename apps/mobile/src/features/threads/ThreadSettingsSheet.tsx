@@ -13,6 +13,7 @@ import {
   getProviderOptionCurrentLabel,
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
+  modelSelectionsEqual,
 } from "@t3tools/shared/model";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import {
@@ -27,6 +28,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -52,10 +54,14 @@ import { ProviderIcon } from "../../components/ProviderIcon";
 import { ThemedSwitch } from "../../components/ThemedSwitch";
 import { cn } from "../../lib/cn";
 import type { ModelOption, ProviderGroup } from "../../lib/modelOptions";
+import { resolveModelOptionChange } from "../../lib/modelOptions";
 import { applyProviderOptionSelection } from "../../lib/providerOptions";
 import { resolveProviderOptionDescriptors } from "../../lib/providerOptions";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
-import { rememberModelOptions } from "../../state/use-model-option-memory";
+import {
+  rememberModelOptions,
+  withRememberedModelOptions,
+} from "../../state/use-model-option-memory";
 import {
   NativeHeaderToolbar,
   NativeStackScreenOptions,
@@ -103,6 +109,20 @@ const PRIMARY_PROVIDER_DRIVERS: ReadonlySet<string> = new Set([
   "codex",
   "antigravity",
 ]);
+
+function confirmDaybreakOff(option: ModelOption): Promise<boolean> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      "Turn off Daybreak?",
+      `${option.label} on ${option.providerLabel} doesn't support the selected Daybreak mode. Switch models and turn off Daybreak?`,
+      [
+        { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+        { text: "OK", onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    );
+  });
+}
 /**
  * Keep measured row changes stable, but let catalog mutations use the list's
  * native bounds so a filtered catalog that underflows returns to the top.
@@ -311,7 +331,7 @@ type ThreadSettingsSessionValue = {
   readonly searchQuery: string;
   readonly showLegacy: boolean;
   readonly applyOptionChange: (id: string, value: string | boolean) => void;
-  readonly commitPendingModel: () => boolean;
+  readonly commitPendingModel: () => Promise<boolean>;
   readonly isApplied: (option: ModelOption) => boolean;
   readonly isDisplayed: (option: ModelOption) => boolean;
   readonly pressModel: (option: ModelOption) => void;
@@ -362,6 +382,16 @@ function ThreadSettingsSessionProvider(
     () => new Set(),
   );
   const [pendingModel, setPendingModel] = useState<ModelOption | null>(null);
+  const modelChangeRequest = useRef(0);
+  useEffect(() => {
+    // A native confirmation can outlive the picker or its source selection.
+    // Discard it if another pick, a catalog refresh, or navigation supersedes it.
+    modelChangeRequest.current += 1;
+    return () => {
+      modelChangeRequest.current += 1;
+    };
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- These changes invalidate a pending native confirmation.
+  }, [pendingModel, props.selectedModel, props.providerGroups]);
 
   const isApplied = useCallback(
     (option: ModelOption) =>
@@ -409,7 +439,8 @@ function ThreadSettingsSessionProvider(
     () => props.providerGroups.some((group) => group.models.some((model) => model.isLegacy)),
     [props.providerGroups],
   );
-  const commitPendingModel = useCallback(() => {
+  const commitPendingModel = useCallback(async () => {
+    const request = ++modelChangeRequest.current;
     if (pendingModel) {
       if (!canCommitPendingModel(pendingModel, props.providerGroups)) {
         Alert.alert(
@@ -418,20 +449,38 @@ function ThreadSettingsSessionProvider(
         );
         return false;
       }
+      const latestOption = props.providerGroups
+        .flatMap((group) => group.models)
+        .find((option) => option.key === pendingModel.key)!;
+      const next = await resolveModelOptionChange({
+        currentSelection: pendingModel.selection,
+        option: { ...latestOption, selection: pendingModel.selection },
+        confirmDaybreakOff: () => confirmDaybreakOff(latestOption),
+      });
+      if (!next || request !== modelChangeRequest.current) return false;
       void Haptics.selectionAsync();
-      props.onSelectModel(pendingModel);
+      rememberModelOptions(
+        next.selection.instanceId,
+        next.selection.model,
+        next.selection.options ?? [],
+      );
+      props.onSelectModel(next);
     }
     return true;
   }, [pendingModel, props.onSelectModel, props.providerGroups]);
 
   const applyOptionChange = useCallback(
     (id: string, value: string | boolean) => {
-      const next = applyProviderOptionSelection(displayedDescriptors, { id, value });
+      const next = applyProviderOptionSelection(
+        displayedDescriptors,
+        { id, value },
+        (pendingModel?.selection ?? props.selectedModel)?.options,
+      );
       if (!next) {
         return;
       }
+      modelChangeRequest.current += 1;
       if (pendingModel) {
-        rememberModelOptions(pendingModel.selection.instanceId, pendingModel.selection.model, next);
         setPendingModel({
           ...pendingModel,
           selection: { ...pendingModel.selection, options: next },
@@ -440,7 +489,7 @@ function ThreadSettingsSessionProvider(
         props.onUpdateOptionSelections(next);
       }
     },
-    [displayedDescriptors, pendingModel, props.onUpdateOptionSelections],
+    [displayedDescriptors, pendingModel, props.onUpdateOptionSelections, props.selectedModel],
   );
 
   const toggleProvider = useCallback((providerKey: string) => {
@@ -454,17 +503,33 @@ function ThreadSettingsSessionProvider(
   }, []);
 
   const pressModel = useCallback(
-    (option: ModelOption) => {
+    async (option: ModelOption) => {
+      const request = ++modelChangeRequest.current;
+      const staged = pendingModelAfterPress({
+        current: pendingModel,
+        pressed: option,
+        pressedIsApplied: isApplied(option),
+      });
+      if (staged === pendingModel) return;
+      const next = await resolveModelOptionChange({
+        currentSelection: pendingModel?.selection ?? props.selectedModel,
+        option: {
+          ...option,
+          selection: staged
+            ? withRememberedModelOptions(staged.selection)
+            : (props.selectedModel ?? option.selection),
+        },
+        confirmDaybreakOff: () => confirmDaybreakOff(option),
+      });
+      if (!next || request !== modelChangeRequest.current) return;
       void Haptics.selectionAsync();
-      setPendingModel((current) =>
-        pendingModelAfterPress({
-          current,
-          pressed: option,
-          pressedIsApplied: isApplied(option),
-        }),
+      setPendingModel(
+        props.selectedModel && modelSelectionsEqual(next.selection, props.selectedModel)
+          ? null
+          : next,
       );
     },
-    [isApplied],
+    [isApplied, pendingModel, props.selectedModel],
   );
 
   const value = useMemo<ThreadSettingsSessionValue>(
@@ -1072,8 +1137,8 @@ function ThreadSettingsModelsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<ThreadSettingsPickerStackParams>>();
   const usesNativeMailSearchToolbar = Platform.OS === "ios" && NATIVE_MAIL_SEARCH_TOOLBAR_SUPPORTED;
   const hasCustomCatalogFilter = session.providerFilter !== null || session.showLegacy;
-  const commitAndClose = useCallback(() => {
-    if (!session.commitPendingModel()) return;
+  const commitAndClose = useCallback(async () => {
+    if (!(await session.commitPendingModel())) return;
     presentation.onClose();
   }, [presentation, session]);
   const providerFilters = useMemo(
@@ -1417,7 +1482,9 @@ export function NewTaskThreadSettingsRouteScreen() {
       {...(flow.selectedModel ? { providerInstanceId: flow.selectedModel.instanceId } : {})}
       providerGroups={flow.providerGroups}
       selectedModel={flow.selectedModel}
-      onSelectModel={(option) => flow.setSelectedModelKey(option.key, option.selection.options)}
+      onSelectModel={(option) =>
+        flow.setSelectedModelKey(option.key, option.selection.options ?? [])
+      }
       optionDescriptors={optionDescriptors}
       onUpdateOptionSelections={flow.setSelectedModelOptions}
       runtimeMode={flow.runtimeMode}

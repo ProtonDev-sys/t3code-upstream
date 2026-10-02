@@ -10,6 +10,7 @@ import {
   formatCodexModelName,
   formatModelSlugName,
   getModelSelectionBooleanOptionValue,
+  getModelSelectionDaybreakProgram,
   getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,
   readCustomModelEntries,
@@ -19,7 +20,56 @@ import {
   normalizeCustomModelSlug,
   normalizeModelSlug,
   modelSelectionsEqual,
+  modelSupportsDaybreakProgram,
 } from "./model.ts";
+
+describe("Daybreak model selection", () => {
+  it.each(["daybreakBlue", "daybreakRed"])("reads an explicit %s selection", (program) => {
+    expect(
+      getModelSelectionDaybreakProgram({
+        instanceId: ProviderInstanceId.make("codex-personal"),
+        model: "test-model",
+        options: [{ id: "cyberAccessProgram", value: program }],
+      }),
+    ).toBe(program);
+  });
+
+  it.each(["standard", "automatic", "unknown", true])(
+    "does not enable Daybreak for %s",
+    (value) => {
+      expect(
+        getModelSelectionDaybreakProgram({
+          instanceId: ProviderInstanceId.make("codex-personal"),
+          model: "test-model",
+          options: [{ id: "cyberAccessProgram", value }],
+        }),
+      ).toBeUndefined();
+    },
+  );
+
+  it("requires the exact program in the destination account's model catalog", () => {
+    const blueModel = {
+      capabilities: createModelCapabilities({
+        optionDescriptors: [
+          {
+            id: "cyberAccessProgram",
+            label: "Daybreak",
+            type: "select",
+            options: [
+              { id: "standard", label: "Off", isDefault: true },
+              { id: "daybreakBlue", label: "On" },
+            ],
+          },
+        ],
+      }),
+    };
+    expect(modelSupportsDaybreakProgram(blueModel, "daybreakBlue")).toBe(true);
+    expect(modelSupportsDaybreakProgram(blueModel, "daybreakRed")).toBe(false);
+    expect(modelSupportsDaybreakProgram({ capabilities: null }, "daybreakBlue")).toBe(false);
+    expect(modelSupportsDaybreakProgram(undefined, "daybreakBlue")).toBe(false);
+    expect(getModelSelectionDaybreakProgram(undefined)).toBeUndefined();
+  });
+});
 
 it("keeps the Codex catalog display formatting", () => {
   expect(formatCodexModelName("gpt-5.3-codex-spark")).toBe("GPT-5.3-Codex-Spark");

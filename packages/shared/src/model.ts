@@ -83,6 +83,29 @@ export function getModelSelectionBooleanOptionValue(
   return getProviderOptionBooleanSelectionValue(modelSelection?.options, id);
 }
 
+/** Reads an explicit Daybreak choice without treating Off or unknown values as enabled. */
+export function getModelSelectionDaybreakProgram(
+  modelSelection: ModelSelection | null | undefined,
+): "daybreakBlue" | "daybreakRed" | undefined {
+  const program = getModelSelectionStringOptionValue(modelSelection, "cyberAccessProgram");
+  return program === "daybreakBlue" || program === "daybreakRed" ? program : undefined;
+}
+
+/** Checks the destination account's exact model metadata before preserving Daybreak. */
+export function modelSupportsDaybreakProgram(
+  model: { readonly capabilities: ModelCapabilities | null } | null | undefined,
+  program: "daybreakBlue" | "daybreakRed",
+): boolean {
+  return (
+    model?.capabilities?.optionDescriptors?.some(
+      (descriptor) =>
+        descriptor.id === "cyberAccessProgram" &&
+        descriptor.type === "select" &&
+        descriptor.options.some((option) => option.id === program),
+    ) ?? false
+  );
+}
+
 function canonicalModelSelectionOptions(
   modelSelection: ModelSelection,
 ): ReadonlyArray<readonly [id: string, value: string | boolean]> {

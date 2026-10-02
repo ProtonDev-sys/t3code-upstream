@@ -76,6 +76,18 @@ reported accounts, refresh provider status, and confirm the second instance has
 its own shadow path and login. A shadow-home conflict usually means the directory
 contains a copied Codex setup. Use a fresh shadow directory and sign in again.
 
+## Choose Daybreak
+
+Select your Codex account and model first, then choose Daybreak in the model's
+traits. It appears only when that account and model advertise access. A single
+available program offers On; accounts with both programs can choose Red or Blue.
+Auto preserves Codex's automatic behavior and remains the default. Choose Off to
+explicitly request standard treatment. Enabling Daybreak keeps your selected model.
+
+Changing to an account or model that cannot use the active program asks for
+confirmation. Cancel keeps both selections; OK switches and turns Daybreak off.
+Codex still controls account eligibility and authorization.
+
 ## Answer questions while Codex works
 
 Codex can ask a question and keep working. Answer it in the thread's question

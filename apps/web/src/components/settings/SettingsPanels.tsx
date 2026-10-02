@@ -58,6 +58,7 @@ import {
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
+import { confirmDaybreakModelSelection } from "../../daybreakModelSelection";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import {
@@ -3208,7 +3209,7 @@ export function GeneralSettingsPanel() {
                         },
                       }
                     : {})}
-                  onInstanceModelChange={(instanceId, model) => {
+                  onInstanceModelChange={async (instanceId, model) => {
                     const reason = textGenerationModelDisabledReason(instanceId, model);
                     if (reason) {
                       toastManager.add({
@@ -3218,11 +3219,17 @@ export function GeneralSettingsPanel() {
                       });
                       return;
                     }
+                    const next = await confirmDaybreakModelSelection({
+                      currentSelection: textGenerationModelSelection,
+                      nextSelection: createModelSelection(instanceId, model),
+                      providers: textGenerationProviders,
+                    });
+                    if (!next) return;
                     updateSettings({
                       textGenerationModelSelection: resolveAppModelSelectionState(
                         {
                           ...settings,
-                          textGenerationModelSelection: createModelSelection(instanceId, model),
+                          textGenerationModelSelection: next,
                         },
                         textGenerationProviders,
                       ),

@@ -1661,7 +1661,7 @@ export interface ChatComposerProps {
     instanceId: ProviderInstanceId,
     model: string,
     options?: { focusComposer?: boolean },
-  ) => void;
+  ) => Promise<boolean>;
   onOpenProviderSetup: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason: (instanceId: ProviderInstanceId, model: string) => string | null;
   toggleInteractionMode: () => void;
@@ -5365,7 +5365,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               ...(multipleModelSelections !== null
                 ? { selectedModels: multipleModelSelections }
                 : {}),
-              onToggleModel: (instanceId: ProviderInstanceId, model: string) => {
+              onToggleModel: async (instanceId: ProviderInstanceId, model: string) => {
                 const current = multipleModelSelections ?? [selectedModelSelection];
                 const matchesModel = (selection: ModelSelection) => {
                   if (selection.instanceId !== instanceId) return false;
@@ -5386,11 +5386,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 if (next.length > 1) {
                   setMultipleModelSelections(next);
                 } else {
-                  setMultipleModelSelections(null);
                   const remaining = next[0] ?? selectedModelSelection;
-                  onProviderModelSelect(remaining.instanceId, remaining.model, {
-                    focusComposer: false,
-                  });
+                  if (
+                    await onProviderModelSelect(remaining.instanceId, remaining.model, {
+                      focusComposer: false,
+                    })
+                  ) {
+                    setMultipleModelSelections(null);
+                  }
                 }
               },
             }
@@ -5438,9 +5441,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           : {})}
         onOpenChange={setIsComposerModelPickerOpen}
         getModelDisabledReason={getModelDisabledReason}
-        onInstanceModelChange={(instanceId, model) => {
-          setMultipleModelSelections(null);
-          onProviderModelSelect(instanceId, model);
+        onInstanceModelChange={async (instanceId, model) => {
+          if (await onProviderModelSelect(instanceId, model)) {
+            setMultipleModelSelections(null);
+          }
         }}
         onOpenProviderSetup={onOpenProviderSetup}
       />

@@ -56,6 +56,7 @@ import { Label } from "../ui/label";
 import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "../ui/menu";
 import { ToggleGroup, Toggle } from "../ui/toggle-group";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyMedia } from "../ui/empty";
+import { confirmDaybreakModelSelection } from "../../daybreakModelSelection";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -805,9 +806,20 @@ function ScheduledTaskEditorDialog({
                 modelOptionsByInstance={modelOptionsByInstance}
                 isComposerOwned={false}
                 triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                onInstanceModelChange={(instanceId, model) =>
-                  setDraft((current) => ({ ...current, modelKey: `${instanceId}:${model}` }))
-                }
+                onInstanceModelChange={async (instanceId, model) => {
+                  const next = await confirmDaybreakModelSelection({
+                    currentSelection: draft.baseModelSelection ?? activeSelection,
+                    nextSelection: { instanceId, model },
+                    providers,
+                  });
+                  if (next) {
+                    setDraft((current) => ({
+                      ...current,
+                      modelKey: `${instanceId}:${model}`,
+                      baseModelSelection: next,
+                    }));
+                  }
+                }}
               />
             </Field>
 

@@ -82,6 +82,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
+import { resolveCodexCyberAccessProgram } from "../../provider/CodexDaybreak.ts";
 import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import {
@@ -637,6 +638,9 @@ const decodeTurnReasoningEffort = Schema.decodeUnknownEffect(
 
 const CodexTurnStartParamsWithCollaborationMode = CodexSchema.V2TurnStartParams.pipe(
   Schema.fieldsAssign({
+    // Experimental in the pinned upstream protocol; omitted from stable JSON schemas.
+    // https://github.com/openai/codex/blob/687a119f0fcaace47e1f1abcc77cec6c813fd6da/codex-rs/app-server-protocol/src/protocol/v2/turn.rs
+    cyberAccessProgram: Schema.optionalKey(CodexSchema.V2TurnStartParams__CyberAccessProgram),
     collaborationMode: Schema.optionalKey(CodexSchema.ClientRequest__CollaborationMode),
     additionalContext: Schema.optionalKey(
       Schema.Record(Schema.String, CodexSchema.V2TurnStartParams__AdditionalContextEntry),
@@ -698,6 +702,8 @@ export function buildCodexTurnStartParams(input: {
   readonly codexInput: ReadonlyArray<CodexSchema.V2TurnStartParams__UserInput>;
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly modelSelection: ModelSelection;
+  /** Resolved against this session's account and model before building the request. */
+  readonly cyberAccessProgram?: CodexSchema.V2TurnStartParams__CyberAccessProgram;
   readonly hasT3Mcp?: boolean;
   readonly browserToolsAvailable?: boolean;
   readonly deviceToolsAvailable?: boolean;
@@ -768,6 +774,9 @@ export function buildCodexTurnStartParams(input: {
       ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
       ...(effort === undefined ? {} : { effort }),
       ...(serviceTier === undefined ? {} : { serviceTier }),
+      ...(input.cyberAccessProgram === undefined
+        ? {}
+        : { cyberAccessProgram: input.cyberAccessProgram }),
       ...(collaborationMode === undefined ? {} : { collaborationMode }),
     });
   });
@@ -5537,7 +5546,12 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                   ? yield* toCodexInput(turnInput)
                   : [];
               const mcpSession = McpProviderSession.readMcpProviderSession(turnInput.threadId);
+              const cyberAccessProgram = yield* resolveCodexCyberAccessProgram(
+                client,
+                turnInput.modelSelection,
+              );
               const turnStartParams = yield* buildCodexTurnStartParams({
+                ...(cyberAccessProgram === undefined ? {} : { cyberAccessProgram }),
                 nativeThreadId: threadId,
                 codexInput,
                 runtimePolicy: turnInput.runtimePolicy,

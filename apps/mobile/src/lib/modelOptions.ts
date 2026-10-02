@@ -7,7 +7,9 @@ import type {
 } from "@t3tools/contracts";
 import {
   buildExplicitProviderOptionSelectionsFromDescriptors,
+  getModelSelectionDaybreakProgram,
   getProviderOptionDescriptors,
+  modelSupportsDaybreakProgram,
 } from "@t3tools/shared/model";
 
 export type ModelOption = {
@@ -32,6 +34,43 @@ export type ProviderGroup = {
   readonly models: ReadonlyArray<ModelOption>;
 };
 
+/** Resolve a model pick before changing any draft, thread, or remembered options. */
+export async function resolveModelOptionChange(input: {
+  readonly currentSelection: ModelSelection | null;
+  readonly option: ModelOption;
+  readonly confirmDaybreakOff: () => Promise<boolean>;
+}): Promise<ModelOption | null> {
+  const program = getModelSelectionDaybreakProgram(input.currentSelection);
+  const supportedProgram =
+    program && modelSupportsDaybreakProgram(input.option, program) ? program : undefined;
+  if (program && !supportedProgram && !(await input.confirmDaybreakOff())) {
+    return null;
+  }
+  const explicitlyOff = input.currentSelection?.options?.some(
+    (option) => option.id === "cyberAccessProgram" && option.value === "standard",
+  );
+  const nextProgram = supportedProgram ?? (program || explicitlyOff ? "standard" : undefined);
+
+  // Daybreak follows the explicit current mode, never a destination's memory.
+  // An explicit Off also prevents a prior Codex session mode from resurfacing.
+  const options = [
+    ...(input.option.selection.options ?? []).filter(
+      (option) => option.id !== "cyberAccessProgram",
+    ),
+    ...(input.option.providerDriver === "codex" && nextProgram
+      ? [{ id: "cyberAccessProgram", value: nextProgram }]
+      : []),
+  ];
+  return {
+    ...input.option,
+    selection: {
+      instanceId: input.option.selection.instanceId,
+      model: input.option.selection.model,
+      ...(options.length > 0 ? { options } : {}),
+    },
+  };
+}
+
 function providerDisplayLabel(provider: {
   readonly displayName?: string | undefined;
   readonly driver: string;
@@ -47,20 +86,31 @@ function providerDisplayLabel(provider: {
 function normalizeSelectionOptions(
   selection: ModelSelection,
   capabilities: ModelCapabilities | null,
+  providerDriver: string,
 ): ModelSelection {
   if (!capabilities) {
     return selection;
   }
-  if (!selection.options?.length) {
+  const selections = selection.options;
+  if (!selections?.length) {
     return { instanceId: selection.instanceId, model: selection.model };
   }
-  const options = buildExplicitProviderOptionSelectionsFromDescriptors(
+  let options = buildExplicitProviderOptionSelectionsFromDescriptors(
     getProviderOptionDescriptors({
       caps: capabilities,
-      selections: selection.options,
+      selections,
     }),
-    selection.options,
+    selections,
   );
+  const explicitOff =
+    providerDriver === "codex"
+      ? selections.find(
+          (option) => option.id === "cyberAccessProgram" && option.value === "standard",
+        )
+      : undefined;
+  if (explicitOff && !options?.some((option) => option.id === "cyberAccessProgram")) {
+    options = [...(options ?? []), explicitOff];
+  }
   return options
     ? { ...selection, options }
     : {
@@ -196,6 +246,7 @@ export function buildModelOptions(
             model: model.slug,
           },
           model.capabilities,
+          provider.driver,
         ),
       });
     }
@@ -213,7 +264,11 @@ export function buildModelOptions(
         selection:
           existing.providerDriver === "antigravity"
             ? fallbackModelSelection
-            : normalizeSelectionOptions(fallbackModelSelection, existing.capabilities),
+            : normalizeSelectionOptions(
+                fallbackModelSelection,
+                existing.capabilities,
+                existing.providerDriver,
+              ),
       });
     } else {
       const provider = config?.providers.find(

@@ -217,6 +217,27 @@ export function mapCodexModelCapabilities(
     });
   }
 
+  const cyberPrograms = model.availableAccessPrograms?.cyber ?? [];
+  const daybreakPrograms = (["daybreakRed", "daybreakBlue"] as const).filter((program) =>
+    cyberPrograms.includes(program),
+  );
+  if (daybreakPrograms.length > 0) {
+    optionDescriptors.push({
+      id: "cyberAccessProgram",
+      label: "Daybreak",
+      type: "select",
+      options: [
+        { id: "automatic", label: "Auto", isDefault: true },
+        { id: "standard", label: "Off" },
+        ...daybreakPrograms.map((program) => ({
+          id: program,
+          label: daybreakPrograms.length === 1 ? "On" : program === "daybreakRed" ? "Red" : "Blue",
+        })),
+      ],
+      currentValue: "automatic",
+    });
+  }
+
   return createModelCapabilities({
     optionDescriptors,
   });
@@ -280,11 +301,20 @@ function appendCustomCodexModels(
       continue;
     }
     seen.add(entry.slug);
+    const capabilities = entry.capabilities ?? fallbackCapabilities;
     customEntries.push({
       slug: entry.slug,
       name: entry.name,
       isCustom: true,
-      capabilities: entry.capabilities ?? fallbackCapabilities,
+      // Access programs are advertised per exact account/model, never inherited
+      // from another model or supplied by a custom capability setting.
+      capabilities: capabilities
+        ? createModelCapabilities({
+            optionDescriptors: (capabilities.optionDescriptors ?? []).filter(
+              (descriptor) => descriptor.id !== "cyberAccessProgram",
+            ),
+          })
+        : null,
     });
   }
   return customEntries.length === 0 ? models : [...models, ...customEntries];

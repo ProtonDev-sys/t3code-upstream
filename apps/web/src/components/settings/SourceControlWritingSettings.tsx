@@ -26,6 +26,7 @@ import {
   resolveAppModelSelectionState,
 } from "../../modelSelection";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
+import { confirmDaybreakModelSelection } from "../../daybreakModelSelection";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
@@ -320,7 +321,7 @@ export function SourceControlWritingSettingsSection() {
                       }
                     : {})}
                   getModelDisabledReason={writerModelDisabledReason}
-                  onInstanceModelChange={(instanceId, model) => {
+                  onInstanceModelChange={async (instanceId, model) => {
                     const reason = writerModelDisabledReason(instanceId, model);
                     if (reason) {
                       toastManager.add({
@@ -330,9 +331,12 @@ export function SourceControlWritingSettingsSection() {
                       });
                       return;
                     }
-                    updateSettings({
-                      sourceControlWriterModelSelection: createModelSelection(instanceId, model),
+                    const next = await confirmDaybreakModelSelection({
+                      currentSelection: activeSelection,
+                      nextSelection: createModelSelection(instanceId, model),
+                      providers: textGenerationProviders,
                     });
+                    if (next) updateSettings({ sourceControlWriterModelSelection: next });
                   }}
                 />
               ) : null}

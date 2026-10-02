@@ -207,3 +207,20 @@ it.effect("keys terminal failure items by provider turn across retries and fallb
     assert.equal(firstAttempt.ordinal, 101);
   }).pipe(Effect.provide(IdAllocator.layer)),
 );
+
+it("explains stale Daybreak selections through a wrapped turn-start failure", () => {
+  const failure = makeProviderFailure({
+    cause: {
+      _tag: "ProviderAdapterTurnStartError",
+      cause: {
+        _tag: "CodexDaybreakUnavailableError",
+        model: "gpt-test",
+        requestedProgram: "daybreakBlue",
+      },
+    },
+  });
+  assert.equal(
+    failure.message,
+    "The selected Daybreak option is not available for this Codex account and model. Select Off or refresh the available models.",
+  );
+});

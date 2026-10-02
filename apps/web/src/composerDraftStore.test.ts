@@ -2024,6 +2024,35 @@ describe("composerDraftStore modelSelection", () => {
     );
   });
 
+  it("toggles Daybreak on the selected model without leaking to another account", () => {
+    const store = useComposerDraftStore.getState();
+    const personal = createModelSelection(CODEX_SECONDARY_INSTANCE, "gpt-5.4", [
+      { id: "reasoningEffort", value: "low" },
+    ]);
+    store.setModelSelection(threadRef, personal);
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.4"));
+
+    for (const value of ["daybreakBlue", "standard"] as const) {
+      store.setProviderModelOptions(
+        threadRef,
+        CODEX_DRIVER,
+        toSelections({ reasoningEffort: "high", cyberAccessProgram: value }),
+        { instanceId: CODEX_INSTANCE, model: "gpt-5.4", persistSticky: true },
+      );
+      const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
+      expect(draft?.modelSelectionByProvider[CODEX_INSTANCE]).toEqual(
+        modelSelection(CODEX_DRIVER, "gpt-5.4", {
+          reasoningEffort: "high",
+          cyberAccessProgram: value,
+        }),
+      );
+      expect(draft?.modelSelectionByProvider[CODEX_SECONDARY_INSTANCE]).toEqual(personal);
+      expect(
+        useComposerDraftStore.getState().stickyModelSelectionByProvider[CODEX_INSTANCE]?.model,
+      ).toBe("gpt-5.4");
+    }
+  });
+
   it("marks trait edits as explicit model intent", () => {
     const store = useComposerDraftStore.getState();
     store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.4"));

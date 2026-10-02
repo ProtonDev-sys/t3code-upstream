@@ -78,6 +78,24 @@ describe("confirm dialog coordinator", () => {
     unregister();
   });
 
+  it("retains a custom action label while closing and when queued", async () => {
+    registerConfirmDialogHost();
+    const first = requireConfirmation(
+      requestConfirmDialog("Switch model?", { confirmLabel: "OK" }),
+    );
+    const second = requireConfirmation(
+      requestConfirmDialog("Switch account?", { confirmLabel: "OK" }),
+    );
+    expect(readConfirmDialogState()).toMatchObject({ status: "confirming", confirmLabel: "OK" });
+    respondToConfirmDialog(true);
+    await expect(first).resolves.toBe(true);
+    expect(readConfirmDialogState()).toMatchObject({ status: "closing", confirmLabel: "OK" });
+    completeConfirmDialogClose();
+    expect(readConfirmDialogState()).toMatchObject({ status: "confirming", confirmLabel: "OK" });
+    respondToConfirmDialog(false);
+    await expect(second).resolves.toBe(false);
+  });
+
   it("cancels active and queued confirmations if the last host unmounts", async () => {
     const unregister = registerConfirmDialogHost();
     const active = requireConfirmation(requestConfirmDialog("Delete the thread?"));

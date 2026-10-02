@@ -8,6 +8,7 @@ import { createModelSelection } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useNavigate } from "@tanstack/react-router";
 
+import { confirmDaybreakModelSelection } from "../../daybreakModelSelection";
 import { getCustomModelOptionsByInstance } from "../../modelSelection";
 import {
   applyProviderInstanceSettings,
@@ -172,9 +173,14 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                     search: { environmentId: representative.environmentId, instanceId },
                   });
               }}
-              onInstanceModelChange={(instanceId, model) =>
-                setModel(createModelSelection(instanceId, model))
-              }
+              onInstanceModelChange={async (instanceId, model) => {
+                const next = await confirmDaybreakModelSelection({
+                  currentSelection: selection,
+                  nextSelection: createModelSelection(instanceId, model),
+                  providers,
+                });
+                if (next) setModel(next);
+              }}
             />
             {!mixedModel ? (
               <TraitsPicker

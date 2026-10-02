@@ -16,7 +16,7 @@ import {
   normalizeModelSlug,
 } from "@t3tools/shared/model";
 import { memo, useCallback } from "react";
-import { BrainIcon, ZapIcon } from "lucide-react";
+import { BrainIcon, createLucideIcon, ZapIcon } from "lucide-react";
 import { UltrafastIcon } from "../Icons";
 import {
   Menu,
@@ -43,8 +43,15 @@ import { useComposerMenuState } from "./useComposerMenuState";
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
 
+const DaybreakIcon = createLucideIcon("Daybreak", [
+  ["path", { d: "M2 17h20", key: "horizon" }],
+  ["path", { d: "M7 17a5 5 0 0 1 10 0", key: "sun" }],
+  ["path", { d: "M12 4v2M5 7l2 2M19 7l-2 2M2 12h2M20 12h2", key: "rays" }],
+]);
+
 const SAVED_OPTION_LABELS: Readonly<Record<string, string>> = {
   agent: "Agent",
+  cyberAccessProgram: "Daybreak",
   effort: "Effort",
   reasoningEffort: "Reasoning effort",
   variant: "Reasoning",
@@ -77,6 +84,25 @@ export function buildUnavailableModelOptionDescriptors(
           currentValue: selection.value,
         },
   );
+}
+
+/** Keep an explicit Off choice after moving to a model without Daybreak controls. */
+export function buildTraitModelOptionSelections(input: {
+  provider: ProviderDriverKind;
+  descriptors: ReadonlyArray<ProviderOptionDescriptor>;
+  previousOptions: ProviderOptions | null | undefined;
+}): ProviderOptions | undefined {
+  const nextOptions = buildProviderOptionSelectionsFromDescriptors(input.descriptors);
+  if (
+    input.provider === "codex" &&
+    !input.descriptors.some((descriptor) => descriptor.id === "cyberAccessProgram") &&
+    input.previousOptions?.some(
+      (option) => option.id === "cyberAccessProgram" && option.value === "standard",
+    )
+  ) {
+    return [...(nextOptions ?? []), { id: "cyberAccessProgram", value: "standard" }];
+  }
+  return nextOptions;
 }
 
 type TraitsPersistence =
@@ -161,7 +187,8 @@ function getSelectedTraits(
     (descriptor): descriptor is Extract<ProviderOptionDescriptor, { type: "boolean" }> =>
       descriptor.type === "boolean",
   );
-  const primarySelectDescriptor = selectDescriptors[0] ?? null;
+  const primarySelectDescriptor =
+    selectDescriptors.find((descriptor) => descriptor.id !== "cyberAccessProgram") ?? null;
   const contextWindowDescriptor =
     selectDescriptors.find((descriptor) => descriptor.id === "contextWindow") ?? null;
   const agentDescriptor = selectDescriptors.find((descriptor) => descriptor.id === "agent") ?? null;
@@ -250,6 +277,7 @@ function getTraitsSectionVisibility(input: {
       showFastMode ||
       showContextWindow ||
       showAgent ||
+      selected.selectDescriptors.some((descriptor) => descriptor.id === "cyberAccessProgram") ||
       (selected.modelIsUnavailable && selected.descriptors.length > 0),
   };
 }
@@ -330,7 +358,13 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     planModeEnabled,
   });
   const updateDescriptors = (nextDescriptors: ReadonlyArray<ProviderOptionDescriptor>) => {
-    updateModelOptions(buildProviderOptionSelectionsFromDescriptors(nextDescriptors));
+    updateModelOptions(
+      buildTraitModelOptionSelections({
+        provider,
+        descriptors: nextDescriptors,
+        previousOptions: modelOptions,
+      }),
+    );
   };
 
   const handleSelectChange = (
@@ -392,7 +426,10 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
           <div key={descriptor.id}>
             {index > 0 ? <MenuDivider /> : null}
             <MenuGroup>
-              <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
+              <div className="flex items-center gap-1.5 px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
+                {descriptor.id === "cyberAccessProgram" ? (
+                  <DaybreakIcon className="size-3.5" />
+                ) : null}
                 {descriptor.label}
               </div>
               {ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id ? (
@@ -488,6 +525,16 @@ export function buildTraitsTriggerDisplay(input: {
   let speedIcon: "fast" | "ultrafast" | null = null;
   const labels: Array<string> = [];
   for (const descriptor of input.descriptors) {
+    if (descriptor.id === "cyberAccessProgram" && descriptor.type === "select") {
+      const value = getProviderOptionCurrentValue(descriptor);
+      if (value === "daybreakRed" || value === "daybreakBlue") {
+        const label = getProviderOptionCurrentLabel(descriptor);
+        labels.push(label === "On" ? "Daybreak" : `Daybreak ${label}`);
+      } else {
+        labels.push(value === "standard" ? "Daybreak Off" : "Daybreak Auto");
+      }
+      continue;
+    }
     if (descriptor.id === "fastMode" && descriptor.type === "boolean") {
       speedIcon = descriptor.currentValue === true ? "fast" : null;
       fastModeFallbackLabel = speedIcon ? "Fast" : "Normal";

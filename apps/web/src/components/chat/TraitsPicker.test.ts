@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ProviderDriverKind, type ProviderOptionDescriptor } from "@t3tools/contracts";
-import { buildTraitsTriggerDisplay, buildUnavailableModelOptionDescriptors } from "./TraitsPicker";
+import {
+  buildTraitsTriggerDisplay,
+  buildTraitModelOptionSelections,
+  buildUnavailableModelOptionDescriptors,
+  shouldRenderTraitsControls,
+} from "./TraitsPicker";
 
 function selectDescriptor(
   id: string,
@@ -230,5 +235,131 @@ describe("buildUnavailableModelOptionDescriptors", () => {
         currentValue: true,
       },
     ]);
+  });
+});
+
+describe("Daybreak trait display", () => {
+  it("distinguishes Auto from an explicit Off choice", () => {
+    const descriptor = selectDescriptor(
+      "cyberAccessProgram",
+      [
+        { id: "automatic", label: "Auto", isDefault: true },
+        { id: "standard", label: "Off" },
+        { id: "daybreakBlue", label: "On" },
+      ],
+      "automatic",
+    );
+    expect(display([EFFORT, descriptor])).toEqual({
+      label: "High · Daybreak Auto",
+      speedIcon: null,
+    });
+    expect(display([EFFORT, { ...descriptor, currentValue: "standard" }])).toEqual({
+      label: "High · Daybreak Off",
+      speedIcon: null,
+    });
+  });
+
+  it("preserves hidden explicit Off while editing reasoning on an ineligible Codex model", () => {
+    expect(
+      buildTraitModelOptionSelections({
+        provider: CODEX,
+        descriptors: [EFFORT],
+        previousOptions: [{ id: "cyberAccessProgram", value: "standard" }],
+      }),
+    ).toEqual([
+      { id: "reasoningEffort", value: "high" },
+      { id: "cyberAccessProgram", value: "standard" },
+    ]);
+    expect(
+      buildTraitModelOptionSelections({
+        provider: CODEX,
+        descriptors: [EFFORT],
+        previousOptions: undefined,
+      }),
+    ).toEqual([{ id: "reasoningEffort", value: "high" }]);
+  });
+
+  it("renders the control only for the selected model's advertised capabilities", () => {
+    const model = {
+      slug: "daybreak-model",
+      name: "Daybreak model",
+      isCustom: false,
+      capabilities: {
+        optionDescriptors: [
+          selectDescriptor(
+            "cyberAccessProgram",
+            [
+              { id: "standard", label: "Off", isDefault: true },
+              { id: "daybreakBlue", label: "On" },
+            ],
+            "standard",
+          ),
+        ],
+      },
+    };
+    const input = {
+      provider: CODEX,
+      models: [model],
+      model: model.slug,
+      modelOptions: undefined,
+      prompt: "",
+      planModeEnabled: true,
+    };
+    expect(shouldRenderTraitsControls(input)).toBe(true);
+    expect(shouldRenderTraitsControls({ ...input, model: "ordinary-model" })).toBe(false);
+    expect(shouldRenderTraitsControls({ ...input, models: [] })).toBe(false);
+  });
+
+  it("shows an explicit Daybreak Off choice in the composer", () => {
+    expect(
+      display([
+        EFFORT,
+        selectDescriptor(
+          "cyberAccessProgram",
+          [
+            { id: "standard", label: "Off", isDefault: true },
+            { id: "daybreakBlue", label: "On" },
+          ],
+          "standard",
+        ),
+      ]),
+    ).toEqual({ label: "High · Daybreak Off", speedIcon: null });
+  });
+
+  it("identifies a single enabled program as Daybreak rather than just On", () => {
+    expect(
+      display([
+        EFFORT,
+        selectDescriptor(
+          "cyberAccessProgram",
+          [
+            { id: "standard", label: "Off", isDefault: true },
+            { id: "daybreakBlue", label: "On" },
+          ],
+          "daybreakBlue",
+        ),
+      ]),
+    ).toEqual({ label: "High · Daybreak", speedIcon: null });
+  });
+
+  it.each([
+    ["daybreakRed", "Red"],
+    ["daybreakBlue", "Blue"],
+  ])("identifies %s when the account advertises both programs", (program, label) => {
+    expect(
+      display([
+        EFFORT,
+        serviceTierDescriptor("priority"),
+        selectDescriptor(
+          "cyberAccessProgram",
+          [
+            { id: "standard", label: "Off", isDefault: true },
+            { id: "daybreakRed", label: "Red" },
+            { id: "daybreakBlue", label: "Blue" },
+          ],
+          program,
+        ),
+      ]),
+    ).toEqual({ label: `High · Daybreak ${label}`, speedIcon: "fast" });
   });
 });

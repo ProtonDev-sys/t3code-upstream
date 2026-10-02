@@ -490,3 +490,90 @@ describe("provider traits render guards", () => {
     expect(renderProviderTraitsMenuContent(args)).toBeNull();
   });
 });
+
+describe("Daybreak dispatch", () => {
+  const daybreak = selectDescriptor("cyberAccessProgram", [
+    { id: "automatic", label: "Auto", isDefault: true },
+    { id: "standard", label: "Off" },
+    { id: "daybreakBlue", label: "On" },
+  ]);
+
+  it.each([undefined, selections(["cyberAccessProgram", "automatic"])])(
+    "omits Daybreak for an eligible model on Auto or without a choice (%j)",
+    (modelOptions) => {
+      const state = getComposerProviderState({
+        provider: PROVIDER,
+        model: MODEL,
+        models: modelWith([daybreak]),
+        modelOptions,
+        planModeEnabled: true,
+      });
+      expect(state.modelOptionsForDispatch).toBeUndefined();
+      expect(state.promptEffort).toBeNull();
+    },
+  );
+
+  it("keeps Daybreak independent of the model and reasoning effort", () => {
+    const state = getComposerProviderState({
+      provider: PROVIDER,
+      model: MODEL,
+      models: modelWith([
+        daybreak,
+        selectDescriptor("reasoningEffort", [{ id: "high", label: "High", isDefault: true }]),
+      ]),
+      modelOptions: selections(["cyberAccessProgram", "daybreakBlue"], ["reasoningEffort", "high"]),
+      planModeEnabled: true,
+    });
+    expect(state.modelOptionsForDispatch).toEqual([
+      { id: "cyberAccessProgram", value: "daybreakBlue" },
+      { id: "reasoningEffort", value: "high" },
+    ]);
+    expect(state.promptEffort).toBe("high");
+  });
+
+  it("preserves explicit Off when the selected Codex model has no Daybreak descriptor", () => {
+    const state = getComposerProviderState({
+      provider: PROVIDER,
+      model: MODEL,
+      models: modelWith([]),
+      modelOptions: selections(["cyberAccessProgram", "standard"]),
+      planModeEnabled: true,
+    });
+    expect(state.modelOptionsForDispatch).toEqual([
+      { id: "cyberAccessProgram", value: "standard" },
+    ]);
+  });
+
+  it("does not add a Daybreak override for an ineligible model without a prior choice", () => {
+    const state = getComposerProviderState({
+      provider: PROVIDER,
+      model: MODEL,
+      models: modelWith([]),
+      modelOptions: undefined,
+      planModeEnabled: true,
+    });
+    expect(state.modelOptionsForDispatch).toBeUndefined();
+  });
+
+  it("does not forward Codex-only Off to another provider", () => {
+    const state = getComposerProviderState({
+      provider: ProviderDriverKind.make("claudeAgent"),
+      model: MODEL,
+      models: modelWith([]),
+      modelOptions: selections(["cyberAccessProgram", "standard"]),
+      planModeEnabled: true,
+    });
+    expect(state.modelOptionsForDispatch).toBeUndefined();
+  });
+
+  it("does not dispatch another account's Daybreak selection without support", () => {
+    const state = getComposerProviderState({
+      provider: PROVIDER,
+      model: MODEL,
+      models: modelWith([]),
+      modelOptions: selections(["cyberAccessProgram", "daybreakBlue"]),
+      planModeEnabled: true,
+    });
+    expect(state.modelOptionsForDispatch).toBeUndefined();
+  });
+});

@@ -562,6 +562,33 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
+  it.effect(
+    "preserves validated Daybreak choices without changing approval or sandbox policies",
+    () =>
+      Effect.gen(function* () {
+        for (const cyberAccessProgram of ["standard", "daybreakBlue", "daybreakRed"] as const) {
+          const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+            nativeThreadId: "native-daybreak",
+            codexInput: [{ type: "text", text: "test" }],
+            runtimePolicy: {
+              runtimeMode: "auto-accept-edits",
+              interactionMode: "default",
+              cwd: null,
+            },
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-test",
+            },
+            cyberAccessProgram,
+          });
+          assert.equal(params.cyberAccessProgram, cyberAccessProgram);
+          assert.equal(params.approvalPolicy, "on-request");
+          assert.equal(params.approvalsReviewer, "user");
+          assert.deepEqual(params.sandboxPolicy, { type: "workspaceWrite" });
+        }
+      }),
+  );
+
   it.effect("compiles per-turn Codex model options and cwd from their owning inputs", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
@@ -1727,6 +1754,117 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         firstTerminal: Deferred.await(firstTerminal),
       };
     });
+
+  for (const program of [
+    "automatic",
+    "standard",
+    "daybreakBlue",
+    "daybreakRed",
+    "unavailable",
+  ] as const) {
+    it.effect(`validates and serializes Daybreak ${program} through the active adapter`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const prompt = "Hello";
+          const selectedProgram = program === "unavailable" ? "daybreakBlue" : program;
+          const preamble = codexReplayPreamble({
+            nativeThreadId: "native-daybreak",
+            nativeTurnId: "turn-daybreak",
+            prompt,
+          });
+          const requiresCatalog = program !== "standard" && program !== "automatic";
+          const turnRequestId = requiresCatalog ? 4 : 3;
+          const entries: CodexReplay.CodexAppServerReplayEntry[] = preamble.slice(0, -3);
+          if (requiresCatalog) {
+            entries.push(
+              { type: "expect_outbound", frame: { id: 3, method: "model/list", params: {} } },
+              {
+                type: "emit_inbound",
+                frame: {
+                  id: 3,
+                  result: {
+                    data: [
+                      {
+                        id: "gpt-5.4",
+                        model: "gpt-5.4",
+                        displayName: "GPT-5.4",
+                        description: "Test model",
+                        hidden: false,
+                        isDefault: true,
+                        defaultReasoningEffort: "medium",
+                        supportedReasoningEfforts: [],
+                        availableAccessPrograms: {
+                          cyber: program === "unavailable" ? ["standard"] : ["standard", program],
+                        },
+                      },
+                    ],
+                    nextCursor: null,
+                  },
+                },
+              },
+            );
+          }
+          if (program !== "unavailable") {
+            entries.push(
+              ...preamble.slice(-3).map((entry) => {
+                if (
+                  entry.type === "runtime_exit" ||
+                  entry.label !== "turn/start" ||
+                  !Predicate.isObject(entry.frame)
+                )
+                  return entry;
+                return {
+                  ...entry,
+                  frame: {
+                    ...entry.frame,
+                    id: turnRequestId,
+                    ...(entry.type === "expect_outbound" && Predicate.isObject(entry.frame.params)
+                      ? {
+                          params: {
+                            ...entry.frame.params,
+                            ...(selectedProgram === "automatic"
+                              ? {}
+                              : { cyberAccessProgram: selectedProgram }),
+                          },
+                        }
+                      : {}),
+                  },
+                };
+              }),
+            );
+          }
+          const harness = yield* makeCodexReplayHarness(
+            makeCodexReplayTranscript({
+              scenario: `daybreak-${program}`,
+              entries,
+            }),
+          );
+          const turn = {
+            ...makeCodexTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId: RunAttemptId.make(`attempt-daybreak-${program}`),
+              text: prompt,
+            }),
+            modelSelection: {
+              ...CODEX_TEST_MODEL_SELECTION,
+              options: [{ id: "cyberAccessProgram", value: selectedProgram }],
+            },
+          };
+          if (program === "unavailable") {
+            const error = yield* harness.runtime.startTurn(turn).pipe(Effect.flip);
+            assert.equal(error._tag, "ProviderAdapterTurnStartError");
+            assert.isTrue(Predicate.isObject(error.cause));
+            if (Predicate.isObject(error.cause))
+              assert.equal(error.cause._tag, "CodexDaybreakUnavailableError");
+          } else {
+            yield* harness.runtime.startTurn(turn);
+          }
+        }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+      ),
+    );
+  }
 
   for (const response of ["supported", "unsupported", "invalid"] as const) {
     it.effect(`delivers native history with ${response} app-server protocol`, () =>

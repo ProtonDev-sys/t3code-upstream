@@ -10,6 +10,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 
 import * as CodexClient from "./client.ts";
+import * as CodexReplay from "./replay.ts";
 
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, "../test/fixtures/codex-app-server-mock-peer.ts"),
@@ -156,3 +157,58 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
     }),
   );
 });
+
+for (const cyberAccessProgram of ["standard", "daybreakBlue", "daybreakRed"] as const) {
+  it.effect(
+    `preserves experimental ${cyberAccessProgram} in the typed turn/start wire request`,
+    () =>
+      Effect.gen(function* () {
+        const client = yield* CodexClient.CodexAppServerClient;
+        const params = {
+          threadId: "thread-daybreak",
+          input: [{ type: "text" as const, text: "Hello" }],
+          cyberAccessProgram,
+          approvalPolicy: "on-request" as const,
+          approvalsReviewer: "user" as const,
+          sandboxPolicy: { type: "workspaceWrite" as const },
+        };
+        const response = yield* client.request("turn/start", params);
+        assert.equal(response.turn.id, "turn-daybreak");
+      }).pipe(
+        Effect.provide(
+          CodexReplay.layerReplay({
+            provider: "codex",
+            protocol: "codex.app-server",
+            version: "0.159.0",
+            scenario: `turn-start-${cyberAccessProgram}`,
+            entries: [
+              {
+                type: "expect_outbound",
+                frame: {
+                  id: 1,
+                  method: "turn/start",
+                  params: {
+                    threadId: "thread-daybreak",
+                    input: [{ type: "text", text: "Hello" }],
+                    cyberAccessProgram,
+                    approvalPolicy: "on-request",
+                    approvalsReviewer: "user",
+                    sandboxPolicy: { type: "workspaceWrite" },
+                  },
+                },
+              },
+              {
+                type: "emit_inbound",
+                frame: {
+                  id: 1,
+                  result: {
+                    turn: { id: "turn-daybreak", items: [], status: "inProgress", error: null },
+                  },
+                },
+              },
+            ],
+          }),
+        ),
+      ),
+  );
+}

@@ -167,6 +167,7 @@ import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
+import { confirmDaybreakModelSelection } from "../daybreakModelSelection";
 import { useDiffPanelStore } from "../diffPanelStore";
 import {
   type ComposerSubmissionIntent,
@@ -9943,9 +9944,14 @@ export default function ChatView(props: ChatViewProps) {
     [activeRuntime, activeThread, providerStatuses, supportsProviderSwitchingViaHandoff],
   );
 
+  const modelSelectionRequestRef = useRef(0);
   const onProviderModelSelect = useCallback(
-    (instanceId: ProviderInstanceId, model: string, options?: { focusComposer?: boolean }) => {
-      if (!activeThread) return;
+    async (
+      instanceId: ProviderInstanceId,
+      model: string,
+      options?: { focusComposer?: boolean },
+    ) => {
+      if (!activeThread) return false;
       // Look up the configured instance so model normalization and custom
       // model lookup stay scoped to that exact instance. Unknown instance ids
       // are rejected by returning early; the server remains authoritative too.
@@ -9958,7 +9964,7 @@ export default function ChatView(props: ChatViewProps) {
         resolvedDriverKind !== lockedProvider
       ) {
         if (options?.focusComposer !== false) scheduleComposerFocus();
-        return;
+        return false;
       }
       if (
         !supportsProviderSwitchingViaHandoff &&
@@ -9974,7 +9980,7 @@ export default function ChatView(props: ChatViewProps) {
           currentEntry.continuation.groupKey !== entry.continuation.groupKey
         ) {
           if (options?.focusComposer !== false) scheduleComposerFocus();
-          return;
+          return false;
         }
       }
       const resolvedModel = resolveAppModelSelectionForInstance(
@@ -9985,7 +9991,7 @@ export default function ChatView(props: ChatViewProps) {
       );
       if (!resolvedModel) {
         if (options?.focusComposer !== false) scheduleComposerFocus();
-        return;
+        return false;
       }
       // Restore this model's own remembered options; without any, start it
       // from its default rather than carrying the previous model's over.
@@ -10012,21 +10018,39 @@ export default function ChatView(props: ChatViewProps) {
           description: modelChangeBlockReason.description,
         });
         if (options?.focusComposer !== false) scheduleComposerFocus();
-        return;
+        return false;
+      }
+      const request = ++modelSelectionRequestRef.current;
+      const confirmedSelection = await confirmDaybreakModelSelection({
+        currentSelection:
+          composerRef.current?.getSendContext().selectedModelSelection ??
+          activeThread.modelSelection,
+        nextSelection: nextModelSelection,
+        providers: providerStatuses,
+      });
+      if (
+        !confirmedSelection ||
+        request !== modelSelectionRequestRef.current ||
+        currentRouteThreadKeyRef.current !== routeThreadKey
+      ) {
+        if (options?.focusComposer !== false) scheduleComposerFocus();
+        return false;
       }
       setComposerDraftModelSelection(
         scopeThreadRef(activeThread.environmentId, activeThread.id),
-        nextModelSelection,
+        confirmedSelection,
         // A complete snapshot: an absent options field means "start from the
         // model default", not "keep the previous model's options".
         { explicit: true, replaceOptions: true },
       );
-      setStickyComposerModelSelection(nextModelSelection);
+      setStickyComposerModelSelection(confirmedSelection);
       if (options?.focusComposer !== false) scheduleComposerFocus();
+      return true;
     },
     [
       activeThread,
       activeRuntime,
+      composerRef,
       lockedProvider,
       supportsProviderSwitchingViaHandoff,
       scheduleComposerFocus,
@@ -10034,6 +10058,7 @@ export default function ChatView(props: ChatViewProps) {
       setStickyComposerModelSelection,
       providerStatuses,
       settings,
+      routeThreadKey,
     ],
   );
   const onEnvModeChange = useCallback(

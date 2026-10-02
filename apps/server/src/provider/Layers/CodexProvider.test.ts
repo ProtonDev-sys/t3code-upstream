@@ -1,6 +1,16 @@
+import { CodexSettings } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import * as CodexSchema from "effect-codex-app-server/schema";
 import { assert, it } from "@effect/vitest";
 
-import { applyPreferredCodexDefaultModel, mapCodexModelCapabilities } from "./CodexProvider.ts";
+import {
+  applyPreferredCodexDefaultModel,
+  mapCodexModelCapabilities,
+  makePendingCodexProvider,
+} from "./CodexProvider.ts";
+
+const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 it("maps current Codex model capability fields", () => {
   const capabilities = mapCodexModelCapabilities({
@@ -171,3 +181,86 @@ it("ignores custom models that shadow a preferred slug", () => {
 
   assert.deepStrictEqual(models.find((model) => model.isDefault)?.slug, "gpt-5.4");
 });
+
+const daybreakModel: CodexSchema.V2ModelListResponse__Model = {
+  id: "gpt-test",
+  model: "gpt-test",
+  displayName: "Test model",
+  description: "Test model",
+  hidden: false,
+  isDefault: true,
+  defaultReasoningEffort: "medium",
+  supportedReasoningEfforts: [],
+};
+
+for (const cyber of [undefined, [], ["standard"]] as const) {
+  it(`hides Daybreak without enabled advertised programs: ${JSON.stringify(cyber)}`, () => {
+    const capabilities = mapCodexModelCapabilities({
+      ...daybreakModel,
+      ...(cyber === undefined ? {} : { availableAccessPrograms: { cyber } }),
+    });
+    assert.deepEqual(capabilities.optionDescriptors, []);
+  });
+}
+
+for (const program of ["daybreakBlue", "daybreakRed"] as const) {
+  it(`presents Auto/Off/On when only ${program} is advertised`, () => {
+    const capabilities = mapCodexModelCapabilities({
+      ...daybreakModel,
+      availableAccessPrograms: { cyber: ["standard", program, program] },
+    });
+    assert.deepEqual(capabilities.optionDescriptors, [
+      {
+        id: "cyberAccessProgram",
+        label: "Daybreak",
+        type: "select",
+        options: [
+          { id: "automatic", label: "Auto", isDefault: true },
+          { id: "standard", label: "Off" },
+          { id: program, label: "On" },
+        ],
+        currentValue: "automatic",
+      },
+    ]);
+  });
+}
+
+it("presents both programs in Auto/Off/Red/Blue order without changing the native default", () => {
+  const capabilities = mapCodexModelCapabilities({
+    ...daybreakModel,
+    availableAccessPrograms: { cyber: ["daybreakBlue", "standard", "daybreakRed"] },
+  });
+  assert.deepEqual(capabilities.optionDescriptors, [
+    {
+      id: "cyberAccessProgram",
+      label: "Daybreak",
+      type: "select",
+      options: [
+        { id: "automatic", label: "Auto", isDefault: true },
+        { id: "standard", label: "Off" },
+        { id: "daybreakRed", label: "Red" },
+        { id: "daybreakBlue", label: "Blue" },
+      ],
+      currentValue: "automatic",
+    },
+  ]);
+});
+
+it.effect("does not accept custom model settings as Daybreak access metadata", () =>
+  Effect.gen(function* () {
+    const provider = yield* makePendingCodexProvider(
+      decodeCodexSettings({
+        customModels: [
+          {
+            slug: "custom-model",
+            capabilities: mapCodexModelCapabilities({
+              ...daybreakModel,
+              availableAccessPrograms: { cyber: ["daybreakBlue"] },
+            }),
+          },
+        ],
+      }),
+    );
+    assert.deepEqual(provider.models[0]?.capabilities?.optionDescriptors, []);
+  }),
+);
