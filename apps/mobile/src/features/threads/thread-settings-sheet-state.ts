@@ -63,21 +63,24 @@ export function pendingModelAfterPress(input: {
   readonly current: ModelOption | null;
   readonly pressed: ModelOption;
   readonly pressedIsApplied: boolean;
-  readonly daybreakEnabled?: boolean;
+  readonly daybreakProgram?: string;
 }): ModelOption | null {
   const pressed = input.current?.key === input.pressed.key ? input.current : input.pressed;
   const daybreak =
-    input.daybreakEnabled === undefined ? null : getModelDaybreakToggleState(pressed);
+    input.daybreakProgram === undefined ? null : getModelDaybreakToggleState(input.pressed);
+  if (
+    input.daybreakProgram &&
+    input.daybreakProgram !== "standard" &&
+    !daybreak?.programs.some((program) => program === input.daybreakProgram)
+  )
+    return input.current;
   if (input.pressedIsApplied && !daybreak) {
     return null;
   }
   return daybreak
     ? {
         ...pressed,
-        selection: withCodexDaybreakProgram(
-          pressed.selection,
-          input.daybreakEnabled ? daybreak.enabledValue : "standard",
-        ),
+        selection: withCodexDaybreakProgram(pressed.selection, input.daybreakProgram),
       }
     : pressed;
 }

@@ -154,27 +154,48 @@ describe("thread settings sheet state", () => {
             id: "cyberAccessProgram",
             label: "Daybreak",
             type: "select",
-            options: ["standard", "daybreakBlue"].map((id) => ({ id, label: id })),
+            options: ["standard", "daybreakBlue", "daybreakRed"].map((id) => ({ id, label: id })),
             currentValue: "standard",
           },
         ],
       },
     };
-    for (const enabled of [true, false]) {
+    for (const program of ["daybreakBlue", "daybreakRed", "standard"]) {
       const pending = pendingModelAfterPress({
         current: null,
         pressed: model,
         pressedIsApplied: true,
-        daybreakEnabled: enabled,
+        daybreakProgram: program,
       });
       expect(pending?.selection.options).toEqual([
         { id: "reasoningEffort", value: "high" },
-        { id: "cyberAccessProgram", value: enabled ? "daybreakBlue" : "standard" },
+        { id: "cyberAccessProgram", value: program },
       ]);
     }
     expect(model.selection.options).toEqual([{ id: "reasoningEffort", value: "high" }]);
     expect(getModelDaybreakToggleState({ ...model, providerDriver: "claudeAgent" })).toBeNull();
     expect(getModelDaybreakToggleState({ ...model, isUnavailable: true })).toBeNull();
+    const blueOnly = {
+      ...model,
+      capabilities: {
+        optionDescriptors: model.capabilities!.optionDescriptors!.map((descriptor) =>
+          descriptor.type === "select"
+            ? {
+                ...descriptor,
+                options: descriptor.options.filter((option) => option.id !== "daybreakRed"),
+              }
+            : descriptor,
+        ),
+      },
+    };
+    expect(
+      pendingModelAfterPress({
+        current: model,
+        pressed: blueOnly,
+        pressedIsApplied: false,
+        daybreakProgram: "daybreakRed",
+      }),
+    ).toBe(model);
   });
 
   it("cannot save a staged model after sign-out removes it from the catalog", () => {

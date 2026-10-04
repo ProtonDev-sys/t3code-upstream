@@ -12,7 +12,7 @@ import {
   resolveModelPickerSelectedModel,
   shouldIncludeModelPickerOption,
   shouldOfferModelPickerSetup,
-  modelPickerDaybreakLabel,
+  modelPickerDaybreakPrograms,
   modelPickerSelection,
 } from "./ModelPickerContent";
 
@@ -38,43 +38,56 @@ describe("Daybreak picker mode", () => {
   const luna = {
     instanceId: ProviderInstanceId.make("codex_work"),
     model: "luna",
-    daybreakProgram: "daybreakBlue",
+    daybreakPrograms: ["daybreakBlue"],
   };
 
   it("shows the switch only for eligible Codex views or Favorites", () => {
     const models = [
-      { instanceId: luna.instanceId, slug: "luna", daybreakProgram: "daybreakBlue" },
+      { instanceId: luna.instanceId, slug: "luna", daybreakPrograms: ["daybreakBlue"] },
       { instanceId: luna.instanceId, slug: "astra" },
       { instanceId: ProviderInstanceId.make("claude"), slug: "fable" },
     ];
     const favorites = new Set([`${luna.instanceId}:luna`]);
-    expect(modelPickerDaybreakLabel(models, luna.instanceId, favorites)).toBe("Daybreak Blue");
-    expect(modelPickerDaybreakLabel(models, "favorites", favorites)).toBe("Daybreak Blue");
+    expect(modelPickerDaybreakPrograms(models, luna.instanceId, favorites)).toEqual([
+      "daybreakBlue",
+    ]);
+    expect(modelPickerDaybreakPrograms(models, "favorites", favorites)).toEqual(["daybreakBlue"]);
     expect(
-      modelPickerDaybreakLabel(models, ProviderInstanceId.make("claude"), favorites),
-    ).toBeNull();
-    expect(modelPickerDaybreakLabel(models, "favorites", new Set())).toBeNull();
+      modelPickerDaybreakPrograms(models, ProviderInstanceId.make("claude"), favorites),
+    ).toEqual([]);
+    expect(modelPickerDaybreakPrograms(models, "favorites", new Set())).toEqual([]);
     expect(
-      modelPickerDaybreakLabel(
-        [...models, { instanceId: luna.instanceId, slug: "sol", daybreakProgram: "daybreakRed" }],
+      modelPickerDaybreakPrograms(
+        [
+          ...models,
+          { instanceId: luna.instanceId, slug: "sol", daybreakPrograms: ["daybreakRed"] },
+        ],
         luna.instanceId,
         favorites,
       ),
-    ).toBe("Daybreak");
+    ).toEqual(["daybreakBlue", "daybreakRed"]);
     const otherAccount = [
       ...models,
       {
         instanceId: ProviderInstanceId.make("codex_red"),
         slug: "sol",
-        daybreakProgram: "daybreakRed",
+        daybreakPrograms: ["daybreakRed"],
       },
     ];
-    expect(modelPickerDaybreakLabel(otherAccount, luna.instanceId, favorites)).toBe(
-      "Daybreak Blue",
-    );
-    expect(modelPickerDaybreakLabel(otherAccount, luna.instanceId, favorites, true)).toBe(
-      "Daybreak",
-    );
+    expect(modelPickerDaybreakPrograms(otherAccount, luna.instanceId, favorites)).toEqual([
+      "daybreakBlue",
+    ]);
+    expect(modelPickerDaybreakPrograms(otherAccount, luna.instanceId, favorites, true)).toEqual([
+      "daybreakBlue",
+      "daybreakRed",
+    ]);
+    expect(
+      modelPickerDaybreakPrograms(
+        [{ ...models[0]!, daybreakPrograms: ["daybreakBlue", "daybreakRed"] }],
+        "favorites",
+        favorites,
+      ),
+    ).toEqual(["daybreakBlue", "daybreakRed"]);
   });
 
   it("sets the native program only in the chosen selection, retaining reasoning", () => {
@@ -86,7 +99,7 @@ describe("Daybreak picker mode", () => {
         { id: "cyberAccessProgram", value: "standard" },
       ],
     };
-    const selected = modelPickerSelection(luna, current, true);
+    const selected = modelPickerSelection(luna, current, "daybreakBlue");
     expect(selected).toEqual({
       ...current,
       options: [
@@ -96,9 +109,22 @@ describe("Daybreak picker mode", () => {
     });
     expect(current.options[1]?.value).toBe("standard");
     expect(
-      modelPickerSelection({ ...luna, model: "astra", daybreakProgram: undefined }, current, true),
+      modelPickerSelection(
+        { ...luna, model: "astra", daybreakPrograms: undefined },
+        current,
+        "daybreakBlue",
+      ),
     ).toBeNull();
-    expect(modelPickerSelection(luna, selected, false)).toEqual(current);
+    expect(modelPickerSelection(luna, selected, "standard")).toEqual(current);
+    expect(modelPickerSelection(luna, current, "daybreakRed")).toBeNull();
+    const both = { ...luna, daybreakPrograms: ["daybreakBlue", "daybreakRed"] };
+    const red = modelPickerSelection(both, selected, "daybreakRed");
+    expect(red?.options).toEqual([
+      { id: "reasoningEffort", value: "high" },
+      { id: "cyberAccessProgram", value: "daybreakRed" },
+    ]);
+    expect(modelPickerSelection(both, red, "daybreakBlue")).toEqual(selected);
+    expect(modelPickerSelection(both, red, undefined)).toBe(red);
   });
 });
 

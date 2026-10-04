@@ -47,12 +47,33 @@ describe("Daybreak toggle state", () => {
     [
       ["standard", "daybreakRed", "daybreakBlue"],
       "standard",
-      { checked: false, enabledValue: "daybreakBlue" },
+      { checked: false, enabledValue: "daybreakBlue", programs: ["daybreakBlue", "daybreakRed"] },
     ],
-    [["standard", "daybreakBlue"], "daybreakBlue", { checked: true, enabledValue: "daybreakBlue" }],
-    [["standard", "daybreakRed"], "daybreakRed", { checked: true, enabledValue: "daybreakRed" }],
-    [["standard", "daybreakRed"], "standard", { checked: false, enabledValue: "daybreakRed" }],
-    [["standard", "daybreakRed"], "daybreakBlue", { checked: false, enabledValue: "daybreakRed" }],
+    [
+      ["standard", "daybreakBlue"],
+      "daybreakBlue",
+      { checked: true, enabledValue: "daybreakBlue", programs: ["daybreakBlue"] },
+    ],
+    [
+      ["standard", "daybreakRed"],
+      "daybreakRed",
+      { checked: true, enabledValue: "daybreakRed", programs: ["daybreakRed"] },
+    ],
+    [
+      ["standard", "daybreakRed"],
+      "standard",
+      { checked: false, enabledValue: "daybreakRed", programs: ["daybreakRed"] },
+    ],
+    [
+      ["standard", "daybreakRed"],
+      "daybreakBlue",
+      { checked: false, enabledValue: "daybreakRed", programs: ["daybreakRed"] },
+    ],
+    [
+      ["standard", "daybreakBlue", "daybreakRed"],
+      "daybreakRed",
+      { checked: true, enabledValue: "daybreakRed", programs: ["daybreakBlue", "daybreakRed"] },
+    ],
   ])("resolves advertised %j with saved %s", (programs, currentValue, expected) => {
     const descriptors = [
       {

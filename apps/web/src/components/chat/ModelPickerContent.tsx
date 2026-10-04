@@ -49,6 +49,7 @@ import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import { TooltipProvider } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
 import { Switch } from "../ui/switch";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import {
   isProviderInstancePickerReady,
   isProviderInstancePickerVisible,
@@ -71,11 +72,11 @@ type ModelPickerItem = {
   continuationGroupKey?: string | undefined;
   isLegacy?: boolean | undefined;
   isUnavailable?: boolean | undefined;
-  daybreakProgram?: string | undefined;
+  daybreakPrograms?: ReadonlyArray<string> | undefined;
 };
 
-export function modelPickerDaybreakLabel(
-  models: ReadonlyArray<Pick<ModelPickerItem, "instanceId" | "slug" | "daybreakProgram">>,
+export function modelPickerDaybreakPrograms(
+  models: ReadonlyArray<Pick<ModelPickerItem, "instanceId" | "slug" | "daybreakPrograms">>,
   selectedInstanceId: ProviderInstanceId | "favorites",
   favorites: ReadonlySet<string>,
   searching = false,
@@ -85,31 +86,26 @@ export function modelPickerDaybreakLabel(
       ? favorites.has(providerModelKey(model.instanceId, model.slug))
       : model.instanceId === selectedInstanceId,
   );
-  if (!contextual.some((model) => model.daybreakProgram)) return null;
-  return getCodexDaybreakLabel(
-    (searching ? models : contextual).map((model) => model.daybreakProgram),
-  );
+  if (!contextual.some((model) => model.daybreakPrograms?.length)) return [];
+  return [
+    ...new Set((searching ? models : contextual).flatMap((model) => model.daybreakPrograms ?? [])),
+  ];
 }
 
 /** Attach the picker mode only when a model is chosen; toggling the mode never edits a selection. */
 export function modelPickerSelection(
-  target: Pick<ModelSelection, "instanceId" | "model"> & { daybreakProgram?: string | undefined },
+  target: Pick<ModelSelection, "instanceId" | "model"> & {
+    daybreakPrograms?: ReadonlyArray<string> | undefined;
+  },
   current: ModelSelection | null | undefined,
-  daybreakEnabled: boolean | undefined,
+  program: string | undefined,
 ) {
   const selection =
     current?.instanceId === target.instanceId && current.model === target.model
       ? current
       : createModelSelection(target.instanceId, target.model);
-  if (daybreakEnabled && !target.daybreakProgram) return null;
-  return withCodexDaybreakProgram(
-    selection,
-    target.daybreakProgram && daybreakEnabled !== undefined
-      ? daybreakEnabled
-        ? target.daybreakProgram
-        : "standard"
-      : undefined,
-  );
+  if (program && program !== "standard" && !target.daybreakPrograms?.includes(program)) return null;
+  return withCodexDaybreakProgram(selection, target.daybreakPrograms?.length ? program : undefined);
 }
 
 export function resolveModelPickerSelectedModel(input: {
@@ -391,6 +387,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const [daybreakMode, setDaybreakMode] = useState(
     () => activeModelKey !== null && (daybreakByModel.get(activeModelKey)?.checked ?? false),
   );
+  const [daybreakProgram, setDaybreakProgram] = useState<string>(
+    () => (activeModelKey && daybreakByModel.get(activeModelKey)?.enabledValue) || "daybreakBlue",
+  );
   const matchesLockedProvider = useCallback(
     (entry: Pick<ProviderInstanceEntry, "driverKind" | "continuationGroupKey">): boolean => {
       if (props.lockedProvider === null) return true;
@@ -458,9 +457,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           ...(model.isUnavailable ? { isUnavailable: true } : {}),
           instanceId,
           driverKind: entry.driverKind,
-          daybreakProgram: model.isUnavailable
+          daybreakPrograms: model.isUnavailable
             ? undefined
-            : daybreakByModel.get(modelPickerModelKey(instanceId, model.slug))?.enabledValue,
+            : daybreakByModel.get(modelPickerModelKey(instanceId, model.slug))?.programs,
           instanceDisplayName: entry.displayName,
           ...(entry.accentColor ? { instanceAccentColor: entry.accentColor } : {}),
           ...(entry.acpRegistryAgentId ? { acpRegistryAgentId: entry.acpRegistryAgentId } : {}),
@@ -479,15 +478,19 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     activeModelSlug,
     daybreakByModel,
   ]);
-  const daybreakLabel =
+  const daybreakPrograms =
     props.modelSelection === undefined
-      ? null
-      : modelPickerDaybreakLabel(
+      ? []
+      : modelPickerDaybreakPrograms(
           flatModels.filter(matchesLockedProvider),
           selectedInstanceId,
           favoritesSet,
           searchQuery.trim().length > 0,
         );
+  const daybreakLabel = getCodexDaybreakLabel(daybreakPrograms);
+  const selectedDaybreakProgram = daybreakPrograms.includes(daybreakProgram)
+    ? daybreakProgram
+    : (daybreakPrograms[0] ?? "daybreakBlue");
   const filterDaybreak = daybreakMode && daybreakLabel !== null;
 
   const isLocked = props.lockedProvider !== null;
@@ -528,7 +531,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   // Filter models based on search query and selected instance
   const filteredModels = useMemo(() => {
-    let result = filterDaybreak ? flatModels.filter((model) => model.daybreakProgram) : flatModels;
+    let result = filterDaybreak
+      ? flatModels.filter((model) => model.daybreakPrograms?.includes(selectedDaybreakProgram))
+      : flatModels;
 
     // Apply tokenized fuzzy search across the combined provider/model search fields.
     if (searchQuery.trim()) {
@@ -626,6 +631,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     favoritesSet,
     flatModels,
     filterDaybreak,
+    selectedDaybreakProgram,
     instanceOrder,
     matchesLockedProvider,
     props.lockedProvider,
@@ -711,11 +717,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           {
             instanceId,
             model: resolvedModel,
-            daybreakProgram: daybreakByModel.get(modelPickerModelKey(instanceId, resolvedModel))
-              ?.enabledValue,
+            daybreakPrograms: daybreakByModel.get(modelPickerModelKey(instanceId, resolvedModel))
+              ?.programs,
           },
           props.modelSelection,
-          props.modelSelection === undefined ? undefined : filterDaybreak,
+          props.modelSelection === undefined
+            ? undefined
+            : filterDaybreak
+              ? selectedDaybreakProgram
+              : "standard",
         );
         if (!selection) return;
         if (additive && onToggleModel) {
@@ -734,6 +744,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       onToggleModel,
       props.modelSelection,
       filterDaybreak,
+      selectedDaybreakProgram,
     ],
   );
 
@@ -1190,18 +1201,39 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         </Combobox>
       </div>
       {daybreakLabel ? (
-        <label className="flex items-center justify-between gap-4 border-t px-3 py-2 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between gap-4 border-t px-3 py-2 text-xs text-muted-foreground">
           <span className="flex items-center gap-2">
             <BadgeCheckIcon className="size-3.5" aria-hidden="true" />
             {daybreakLabel}
           </span>
-          <Switch
-            size="sm"
-            aria-label="Daybreak"
-            checked={daybreakMode}
-            onCheckedChange={setDaybreakMode}
-          />
-        </label>
+          <div className="flex items-center gap-2">
+            {filterDaybreak && daybreakPrograms.length > 1 ? (
+              <ToggleGroup
+                aria-label="Daybreak program"
+                value={[selectedDaybreakProgram]}
+                onValueChange={(values) => {
+                  if (values[0]) setDaybreakProgram(values[0]);
+                }}
+              >
+                {daybreakPrograms.map((program) => (
+                  <Toggle
+                    key={program}
+                    value={program}
+                    aria-label={program === "daybreakBlue" ? "Daybreak Blue" : "Daybreak Red"}
+                  >
+                    {program === "daybreakBlue" ? "Blue" : "Red"}
+                  </Toggle>
+                ))}
+              </ToggleGroup>
+            ) : null}
+            <Switch
+              size="sm"
+              aria-label="Daybreak"
+              checked={daybreakMode}
+              onCheckedChange={setDaybreakMode}
+            />
+          </div>
+        </div>
       ) : null}
     </TooltipProvider>
   );

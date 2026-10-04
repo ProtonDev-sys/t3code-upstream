@@ -276,15 +276,16 @@ export function getCodexDaybreakState(
       candidate.id === "cyberAccessProgram" && candidate.type === "select",
   );
   if (!descriptor || !descriptor.options.some((option) => option.id === "standard")) return null;
-  const hasBlue = descriptor.options.some((option) => option.id === "daybreakBlue");
-  const hasRed = descriptor.options.some((option) => option.id === "daybreakRed");
-  if (!hasBlue && !hasRed) return null;
+  const programs = (["daybreakBlue", "daybreakRed"] as const).filter((program) =>
+    descriptor.options.some((option) => option.id === program),
+  );
+  if (programs.length === 0) return null;
   value ??= getProviderOptionCurrentValue(descriptor);
-  const selected =
-    (value === "daybreakBlue" && hasBlue) || (value === "daybreakRed" && hasRed) ? value : null;
+  const selected = programs.find((program) => program === value) ?? null;
   return {
     checked: selected !== null,
-    enabledValue: selected ?? (hasBlue ? "daybreakBlue" : "daybreakRed"),
+    enabledValue: selected ?? programs[0]!,
+    programs,
   } as const;
 }
 
