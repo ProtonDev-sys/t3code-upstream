@@ -121,16 +121,30 @@ describe("thread settings sheet state", () => {
     ).toBeNull();
   });
 
-  it("preserves staged options when the highlighted model is pressed again", () => {
+  it("refreshes model capabilities while preserving staged options on another press", () => {
     const pending = modelOption("gpt-next", [{ id: "effort", value: "high" }]);
+    const refreshed: ModelOption = {
+      ...modelOption("gpt-next"),
+      capabilities: {
+        optionDescriptors: [
+          {
+            id: "cyberAccessProgram",
+            label: "Daybreak",
+            type: "select",
+            options: ["standard", "daybreakBlue"].map((id) => ({ id, label: id })),
+            currentValue: "standard",
+          },
+        ],
+      },
+    };
 
     expect(
       pendingModelAfterPress({
         current: pending,
-        pressed: modelOption("gpt-next"),
+        pressed: refreshed,
         pressedIsApplied: false,
       }),
-    ).toBe(pending);
+    ).toEqual({ ...refreshed, selection: pending.selection });
   });
 
   it("stages a different model", () => {

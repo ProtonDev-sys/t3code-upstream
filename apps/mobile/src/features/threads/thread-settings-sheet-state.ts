@@ -65,7 +65,10 @@ export function pendingModelAfterPress(input: {
   readonly pressedIsApplied: boolean;
   readonly daybreakProgram?: string;
 }): ModelOption | null {
-  const pressed = input.current?.key === input.pressed.key ? input.current : input.pressed;
+  const pressed =
+    input.current?.key === input.pressed.key
+      ? { ...input.pressed, selection: input.current.selection }
+      : input.pressed;
   const daybreak =
     input.daybreakProgram === undefined ? null : getModelDaybreakToggleState(input.pressed);
   if (
