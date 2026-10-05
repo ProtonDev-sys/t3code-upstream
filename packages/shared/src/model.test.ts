@@ -19,7 +19,6 @@ import {
   getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,
   getCodexDaybreakState,
-  getCodexDaybreakLabel,
   readCustomModelEntries,
   toCustomModelSetting,
   getProviderOptionBooleanSelectionValue,
@@ -32,14 +31,6 @@ import {
 describe("Daybreak toggle state", () => {
   it("requires an advertised program and standard treatment", () => {
     expect(getCodexDaybreakState([])).toBeNull();
-  });
-  it.each([
-    [[], null],
-    [[undefined, "daybreakBlue"], "Daybreak Blue"],
-    [["daybreakRed"], "Daybreak Red"],
-    [["daybreakBlue", "daybreakRed"], "Daybreak"],
-  ])("labels the available programs %j", (programs, label) => {
-    expect(getCodexDaybreakLabel(programs)).toBe(label);
   });
   it.each([
     [[], "standard", null],

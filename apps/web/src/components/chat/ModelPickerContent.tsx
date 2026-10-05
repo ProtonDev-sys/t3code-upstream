@@ -7,7 +7,7 @@ import {
 } from "@t3tools/contracts";
 import {
   createModelSelection,
-  getCodexDaybreakLabel,
+  CODEX_DAYBREAK_CHOICES,
   getCodexDaybreakState,
   getModelSelectionStringOptionValue,
   resolveSelectableModel,
@@ -16,7 +16,7 @@ import {
 import { useAtomValue } from "@effect/atom-react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { memo, useMemo, useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
-import { BadgeCheckIcon, ChevronRightIcon } from "lucide-react";
+import { BadgeCheckIcon, ChevronRightIcon, LockKeyholeIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBanner";
@@ -48,7 +48,6 @@ import { cn } from "~/lib/utils";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import { TooltipProvider } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
-import { Switch } from "../ui/switch";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import {
   isProviderInstancePickerReady,
@@ -92,7 +91,7 @@ export function modelPickerDaybreakPrograms(
   ];
 }
 
-/** Attach the picker mode only when a model is chosen; toggling the mode never edits a selection. */
+/** Attach the picker mode only when a model is chosen; changing the filter never edits a selection. */
 export function modelPickerSelection(
   target: Pick<ModelSelection, "instanceId" | "model"> & {
     daybreakPrograms?: ReadonlyArray<string> | undefined;
@@ -384,12 +383,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     }
     return states;
   }, [instanceEntries, props.modelSelection]);
-  const [daybreakMode, setDaybreakMode] = useState(
-    () => activeModelKey !== null && (daybreakByModel.get(activeModelKey)?.checked ?? false),
-  );
-  const [daybreakProgram, setDaybreakProgram] = useState<string>(
-    () => (activeModelKey && daybreakByModel.get(activeModelKey)?.enabledValue) || "daybreakBlue",
-  );
+  const [daybreakProgram, setDaybreakProgram] = useState<string>(() => {
+    const state = activeModelKey && daybreakByModel.get(activeModelKey);
+    return state && state.checked ? state.enabledValue : "standard";
+  });
   const matchesLockedProvider = useCallback(
     (entry: Pick<ProviderInstanceEntry, "driverKind" | "continuationGroupKey">): boolean => {
       if (props.lockedProvider === null) return true;
@@ -487,11 +484,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           favoritesSet,
           searchQuery.trim().length > 0,
         );
-  const daybreakLabel = getCodexDaybreakLabel(daybreakPrograms);
   const selectedDaybreakProgram = daybreakPrograms.includes(daybreakProgram)
     ? daybreakProgram
-    : (daybreakPrograms[0] ?? "daybreakBlue");
-  const filterDaybreak = daybreakMode && daybreakLabel !== null;
+    : "standard";
+  const filterDaybreak = selectedDaybreakProgram !== "standard";
 
   const isLocked = props.lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;
@@ -1200,39 +1196,34 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           </div>
         </Combobox>
       </div>
-      {daybreakLabel ? (
+      {daybreakPrograms.length > 0 ? (
         <div className="flex items-center justify-between gap-4 border-t px-3 py-2 text-xs text-muted-foreground">
           <span className="flex items-center gap-2">
             <BadgeCheckIcon className="size-3.5" aria-hidden="true" />
-            {daybreakLabel}
+            Daybreak
           </span>
-          <div className="flex items-center gap-2">
-            {filterDaybreak && daybreakPrograms.length > 1 ? (
-              <ToggleGroup
-                aria-label="Daybreak program"
-                value={[selectedDaybreakProgram]}
-                onValueChange={(values) => {
-                  if (values[0]) setDaybreakProgram(values[0]);
-                }}
-              >
-                {daybreakPrograms.map((program) => (
-                  <Toggle
-                    key={program}
-                    value={program}
-                    aria-label={program === "daybreakBlue" ? "Daybreak Blue" : "Daybreak Red"}
-                  >
-                    {program === "daybreakBlue" ? "Blue" : "Red"}
-                  </Toggle>
-                ))}
-              </ToggleGroup>
-            ) : null}
-            <Switch
-              size="sm"
-              aria-label="Daybreak"
-              checked={daybreakMode}
-              onCheckedChange={setDaybreakMode}
-            />
-          </div>
+          <ToggleGroup
+            aria-label="Daybreak program"
+            value={[selectedDaybreakProgram]}
+            onValueChange={(values) => {
+              if (values[0]) setDaybreakProgram(values[0]);
+            }}
+          >
+            {CODEX_DAYBREAK_CHOICES.map(({ value, label }) => {
+              const disabled = value !== "standard" && !daybreakPrograms.includes(value);
+              return (
+                <Toggle
+                  key={value}
+                  value={value}
+                  disabled={disabled}
+                  aria-label={`Daybreak ${label}${disabled ? " (unavailable for this account)" : ""}`}
+                >
+                  {disabled ? <LockKeyholeIcon className="size-3" aria-hidden="true" /> : null}
+                  {label}
+                </Toggle>
+              );
+            })}
+          </ToggleGroup>
         </div>
       ) : null}
     </TooltipProvider>

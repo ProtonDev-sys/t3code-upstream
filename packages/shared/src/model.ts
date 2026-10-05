@@ -289,13 +289,11 @@ export function getCodexDaybreakState(
   } as const;
 }
 
-export function getCodexDaybreakLabel(programs: ReadonlyArray<string | undefined>) {
-  const choices = new Set(programs);
-  choices.delete(undefined);
-  if (choices.size === 0) return null;
-  if (choices.size > 1) return "Daybreak";
-  return choices.has("daybreakBlue") ? "Daybreak Blue" : "Daybreak Red";
-}
+export const CODEX_DAYBREAK_CHOICES = [
+  { value: "daybreakRed", label: "Red" },
+  { value: "daybreakBlue", label: "Blue" },
+  { value: "standard", label: "Off" },
+] as const;
 
 /** Apply the chosen treatment without changing the model's other options. */
 export function withCodexDaybreakProgram(selection: ModelSelection, value: string | undefined) {

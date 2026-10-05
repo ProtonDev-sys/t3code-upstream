@@ -11,7 +11,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import {
   getCodexDaybreakState,
-  getCodexDaybreakLabel,
+  CODEX_DAYBREAK_CHOICES,
   getProviderOptionCurrentLabel,
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
@@ -225,7 +225,6 @@ function SwitchRow(props: {
   readonly value: boolean;
   readonly onValueChange: (value: boolean) => void;
   readonly isLast?: boolean;
-  readonly children?: ReactNode;
 }) {
   return (
     <View
@@ -235,14 +234,11 @@ function SwitchRow(props: {
       )}
     >
       <Text className="text-sm font-t3-medium text-foreground">{props.label}</Text>
-      <View className="flex-row items-center gap-2">
-        {props.children}
-        <ThemedSwitch
-          accessibilityLabel={props.label}
-          onValueChange={props.onValueChange}
-          value={props.value}
-        />
-      </View>
+      <ThemedSwitch
+        accessibilityLabel={props.label}
+        onValueChange={props.onValueChange}
+        value={props.value}
+      />
     </View>
   );
 }
@@ -316,9 +312,7 @@ type ThreadSettingsSessionValue = {
   readonly runtimeModeChoices: ReturnType<typeof runtimeModeChoicesForSupportedModes>;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
   readonly displayedDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
-  readonly daybreak: string | null;
-  readonly daybreakEnabled: boolean;
-  readonly setDaybreakEnabled: (enabled: boolean) => void;
+  readonly daybreak: boolean;
   readonly daybreakPrograms: ReadonlyArray<string>;
   readonly selectedDaybreakProgram: string;
   readonly setDaybreakProgram: (program: string) => void;
@@ -377,12 +371,10 @@ function ThreadSettingsSessionProvider(
   );
   const [showLegacyToggle, setShowLegacyToggle] = useState(false);
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
-  const [daybreakEnabled, setDaybreakEnabled] = useState(
-    () => getCodexDaybreakState(props.optionDescriptors)?.checked ?? false,
-  );
-  const [daybreakProgram, setDaybreakProgram] = useState<string>(
-    () => getCodexDaybreakState(props.optionDescriptors)?.enabledValue ?? "daybreakBlue",
-  );
+  const [daybreakProgram, setDaybreakProgram] = useState<string>(() => {
+    const state = getCodexDaybreakState(props.optionDescriptors);
+    return state?.checked ? state.enabledValue : "standard";
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [providerExpansionOverrides, setProviderExpansionOverrides] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -409,10 +401,10 @@ function ThreadSettingsSessionProvider(
     ],
     [favoriteKeys, props.providerGroups, providerFilter],
   );
-  const daybreak = getCodexDaybreakLabel(daybreakPrograms);
+  const daybreak = daybreakPrograms.length > 0;
   const selectedDaybreakProgram = daybreakPrograms.some((program) => program === daybreakProgram)
     ? daybreakProgram
-    : (daybreakPrograms[0] ?? "daybreakBlue");
+    : "standard";
   // The list highlights the staged pick; Save turns it into the applied one.
   const isDisplayed = useCallback(
     (option: ModelOption) => (pendingModel ? option.key === pendingModel.key : isApplied(option)),
@@ -513,13 +505,11 @@ function ThreadSettingsSessionProvider(
               ? { ...option, selection: withRememberedModelOptions(option.selection) }
               : option,
           pressedIsApplied: isApplied(option),
-          ...(daybreak
-            ? { daybreakProgram: daybreakEnabled ? selectedDaybreakProgram : "standard" }
-            : {}),
+          ...(daybreak ? { daybreakProgram: selectedDaybreakProgram } : {}),
         }),
       );
     },
-    [daybreak, daybreakEnabled, selectedDaybreakProgram, isApplied],
+    [daybreak, selectedDaybreakProgram, isApplied],
   );
 
   const value = useMemo<ThreadSettingsSessionValue>(
@@ -532,8 +522,6 @@ function ThreadSettingsSessionProvider(
       onUpdateRuntimeMode: props.onUpdateRuntimeMode,
       displayedDescriptors,
       daybreak,
-      daybreakEnabled: daybreak !== null && daybreakEnabled,
-      setDaybreakEnabled,
       daybreakPrograms,
       selectedDaybreakProgram,
       setDaybreakProgram,
@@ -564,7 +552,6 @@ function ThreadSettingsSessionProvider(
       compatibleRuntimeMode,
       displayedDescriptors,
       daybreak,
-      daybreakEnabled,
       daybreakPrograms,
       selectedDaybreakProgram,
       favoriteKeys,
@@ -711,7 +698,7 @@ function useThreadSettingsCatalogItems(
         const visibleModels = favoritesFirst(
           catalogModels.filter(
             (model) =>
-              (!session.daybreakEnabled ||
+              (session.selectedDaybreakProgram === "standard" ||
                 getModelDaybreakToggleState(model)?.programs.some(
                   (program) => program === session.selectedDaybreakProgram,
                 )) &&
@@ -767,7 +754,6 @@ function useThreadSettingsCatalogItems(
       }),
     [
       session.isApplied,
-      session.daybreakEnabled,
       session.selectedDaybreakProgram,
       session.isDisplayed,
       session.favoriteKeys,
@@ -991,28 +977,20 @@ function ThreadSettingsMainContent(props: {
       ListHeaderComponent={
         <>
           {session.daybreak ? (
-            <View className="mx-4 overflow-hidden rounded-2xl bg-grouped-card">
-              <SwitchRow
-                isLast
-                label={session.daybreak}
-                value={session.daybreakEnabled}
-                onValueChange={session.setDaybreakEnabled}
-              >
-                {session.daybreakEnabled && session.daybreakPrograms.length > 1 ? (
-                  <SegmentedControl
-                    size="compact"
-                    className="w-40"
-                    selected={session.selectedDaybreakProgram}
-                    onSelect={session.setDaybreakProgram}
-                    options={session.daybreakPrograms.map((program) => ({
-                      value: program,
-                      label: program === "daybreakBlue" ? "Blue" : "Red",
-                      accessibilityLabel:
-                        program === "daybreakBlue" ? "Daybreak Blue" : "Daybreak Red",
-                    }))}
-                  />
-                ) : null}
-              </SwitchRow>
+            <View className="mx-4 flex-row items-center justify-between rounded-2xl bg-grouped-card px-4 py-1">
+              <Text className="text-sm font-t3-medium text-foreground">Daybreak</Text>
+              <SegmentedControl
+                size="compact"
+                className="w-48"
+                selected={session.selectedDaybreakProgram}
+                onSelect={session.setDaybreakProgram}
+                options={CODEX_DAYBREAK_CHOICES.map(({ value, label }) => ({
+                  value,
+                  label,
+                  accessibilityLabel: `Daybreak ${label}`,
+                  disabled: value !== "standard" && !session.daybreakPrograms.includes(value),
+                }))}
+              />
             </View>
           ) : null}
           {Platform.OS === "android" ? (

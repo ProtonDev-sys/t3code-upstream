@@ -41,7 +41,7 @@ describe("Daybreak picker mode", () => {
     daybreakPrograms: ["daybreakBlue"],
   };
 
-  it("shows the switch only for eligible Codex views or Favorites", () => {
+  it("offers only the current account's programs in eligible Codex views or Favorites", () => {
     const models = [
       { instanceId: luna.instanceId, slug: "luna", daybreakPrograms: ["daybreakBlue"] },
       { instanceId: luna.instanceId, slug: "astra" },
