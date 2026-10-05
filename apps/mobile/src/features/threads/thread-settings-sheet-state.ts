@@ -58,29 +58,38 @@ export function modelMatchesCatalogQuery(input: {
   ].some((value) => value.toLocaleLowerCase().includes(query));
 }
 
-/** Preserve staged provider options when the highlighted model is tapped again. */
+/** Preserve staged options using current capabilities, dropping revoked Daybreak access. */
 export function pendingModelAfterPress(input: {
   readonly current: ModelOption | null;
   readonly pressed: ModelOption;
   readonly pressedIsApplied: boolean;
   readonly daybreakProgram?: string;
 }): ModelOption | null {
-  const pressed =
-    input.current?.key === input.pressed.key
-      ? { ...input.pressed, selection: input.current.selection }
-      : input.pressed;
-  const daybreak =
-    input.daybreakProgram === undefined ? null : getModelDaybreakToggleState(input.pressed);
+  const daybreak = getModelDaybreakToggleState(input.pressed);
+  const selection =
+    input.current?.key === input.pressed.key ? input.current.selection : input.pressed.selection;
+  const pressed = {
+    ...input.pressed,
+    selection: {
+      ...selection,
+      options: selection.options?.filter(
+        (option) =>
+          option.id !== "cyberAccessProgram" ||
+          option.value === "standard" ||
+          daybreak?.programs.some((program) => program === option.value),
+      ),
+    },
+  };
   if (
     input.daybreakProgram &&
     input.daybreakProgram !== "standard" &&
     !daybreak?.programs.some((program) => program === input.daybreakProgram)
   )
-    return input.current;
-  if (input.pressedIsApplied && !daybreak) {
+    return input.current?.key === input.pressed.key ? pressed : input.current;
+  if (input.pressedIsApplied && (!daybreak || input.daybreakProgram === undefined)) {
     return null;
   }
-  return daybreak
+  return daybreak && input.daybreakProgram !== undefined
     ? {
         ...pressed,
         selection: withCodexDaybreakProgram(pressed.selection, input.daybreakProgram),

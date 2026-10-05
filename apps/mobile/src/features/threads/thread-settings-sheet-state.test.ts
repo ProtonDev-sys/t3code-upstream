@@ -156,7 +156,7 @@ describe("thread settings sheet state", () => {
         pressed,
         pressedIsApplied: false,
       }),
-    ).toBe(pressed);
+    ).toEqual(pressed);
   });
 
   it("applies Daybreak when a model is chosen while preserving other options", () => {
@@ -185,6 +185,10 @@ describe("thread settings sheet state", () => {
         { id: "reasoningEffort", value: "high" },
         { id: "cyberAccessProgram", value: program },
       ]);
+      expect(
+        pendingModelAfterPress({ current: pending, pressed: model, pressedIsApplied: false })
+          ?.selection.options,
+      ).toEqual(pending?.selection.options);
     }
     expect(model.selection.options).toEqual([{ id: "reasoningEffort", value: "high" }]);
     expect(getModelDaybreakToggleState({ ...model, providerDriver: "claudeAgent" })).toBeNull();
@@ -202,14 +206,43 @@ describe("thread settings sheet state", () => {
         ),
       },
     };
+    const staged: ModelOption = {
+      ...model,
+      selection: {
+        ...model.selection,
+        options: [...model.selection.options!, { id: "cyberAccessProgram", value: "daybreakRed" }],
+      },
+    };
     expect(
       pendingModelAfterPress({
-        current: model,
-        pressed: blueOnly,
+        current: staged,
+        pressed: modelOption("gpt-other"),
         pressedIsApplied: false,
         daybreakProgram: "daybreakRed",
       }),
-    ).toBe(model);
+    ).toBe(staged);
+    for (const pressed of [blueOnly, { ...model, capabilities: null }]) {
+      for (const daybreakProgram of [undefined, "daybreakRed"]) {
+        const cleaned = pendingModelAfterPress({
+          current: staged,
+          pressed,
+          pressedIsApplied: false,
+          daybreakProgram,
+        });
+        expect(cleaned).toEqual({ ...pressed, selection: model.selection });
+        expect(
+          pendingModelAfterPress({ current: cleaned, pressed: model, pressedIsApplied: false })
+            ?.selection.options,
+        ).toEqual(model.selection.options);
+      }
+      expect(
+        pendingModelAfterPress({
+          current: null,
+          pressed: { ...pressed, selection: staged.selection },
+          pressedIsApplied: false,
+        }),
+      ).toEqual({ ...pressed, selection: model.selection });
+    }
   });
 
   it("cannot save a staged model after sign-out removes it from the catalog", () => {
