@@ -126,6 +126,27 @@ describe("Daybreak picker mode", () => {
     expect(modelPickerSelection(both, red, "daybreakBlue")).toEqual(selected);
     expect(modelPickerSelection(both, red, undefined)).toBe(red);
   });
+
+  it.each(["daybreakBlue", "daybreakRed"])(
+    "clears revoked %s access when reselecting the same model, retaining other options",
+    (program) => {
+      const options = [
+        { id: "reasoningEffort", value: "high" },
+        { id: "serviceTier", value: "fast" },
+      ];
+      const current = {
+        instanceId: luna.instanceId,
+        model: luna.model,
+        options: [...options, { id: "cyberAccessProgram", value: program }],
+      };
+      for (const daybreakPrograms of [undefined, []]) {
+        const target = { ...luna, daybreakPrograms };
+        expect(modelPickerSelection(target, current, "standard")).toEqual({ ...current, options });
+        expect(modelPickerSelection(target, current, undefined)).toEqual({ ...current, options });
+        expect(modelPickerSelection(target, current, program)).toBeNull();
+      }
+    },
+  );
 });
 
 describe("shouldIncludeModelPickerOption", () => {

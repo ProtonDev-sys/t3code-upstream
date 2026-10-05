@@ -104,6 +104,12 @@ export function modelPickerSelection(
       ? current
       : createModelSelection(target.instanceId, target.model);
   if (program && program !== "standard" && !target.daybreakPrograms?.includes(program)) return null;
+  if (!target.daybreakPrograms?.length && selection.options) {
+    return {
+      ...selection,
+      options: selection.options.filter((option) => option.id !== "cyberAccessProgram"),
+    };
+  }
   return withCodexDaybreakProgram(selection, target.daybreakPrograms?.length ? program : undefined);
 }
 
