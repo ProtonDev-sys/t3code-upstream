@@ -1896,7 +1896,9 @@ describe("CodexAdapterV2 post-settle continuation", () => {
             undefined,
             undefined,
             undefined,
-            Ref.get(catalog),
+            mode === "other-account"
+              ? Effect.die(new Error("Must not read another account's model catalog"))
+              : Ref.get(catalog),
           );
           const turnInput = makeCodexTestTurnInput({
             threadId: harness.threadId,

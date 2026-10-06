@@ -13,6 +13,7 @@ import { deriveProviderInstanceEntries, NO_PROVIDER_MODEL_SELECTION } from "./pr
 import {
   getCustomModelOptionsByInstance,
   getAppModelOptionsForInstance,
+  mergeRememberedModelOptions,
   resolveAppModelSelectionForInstance,
   resolveAppModelSelectionState,
 } from "./modelSelection";
@@ -66,6 +67,84 @@ function settingsWithProviderInstances(): UnifiedSettings {
     },
   };
 }
+
+describe("remembered model options", () => {
+  const selection = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.5");
+  const reasoning = { id: "reasoning_effort", value: "high" };
+  const catalog = (programs?: ReadonlyArray<string>): ServerProvider => ({
+    ...provider({ instanceId: "codex" }),
+    models: [
+      {
+        slug: selection.model,
+        name: selection.model,
+        isCustom: false,
+        capabilities:
+          programs === undefined
+            ? {}
+            : {
+                optionDescriptors: [
+                  {
+                    id: "cyberAccessProgram",
+                    label: "Daybreak",
+                    type: "select",
+                    options: ["standard", ...programs].map((id) => ({ id, label: id })),
+                    currentValue: "standard",
+                  },
+                ],
+              },
+      },
+    ],
+  });
+
+  it.each([
+    ["daybreakBlue", undefined, undefined],
+    ["daybreakRed", [], undefined],
+    ["daybreakBlue", ["daybreakRed"], undefined],
+    ["daybreakRed", ["daybreakBlue"], undefined],
+    ["daybreakBlue", ["daybreakBlue"], "daybreakBlue"],
+    ["daybreakRed", ["daybreakRed"], "daybreakRed"],
+    ["standard", ["daybreakBlue"], "standard"],
+    ["unknown", ["daybreakBlue"], undefined],
+  ] as const)("restores %s only with current access %j", (value, programs, expected) => {
+    const merged = mergeRememberedModelOptions(
+      selection,
+      [reasoning, { id: "cyberAccessProgram", value }],
+      catalog(programs),
+    );
+    expect(merged.options).toEqual([
+      reasoning,
+      ...(expected === undefined ? [] : [{ id: "cyberAccessProgram", value: expected }]),
+    ]);
+  });
+
+  it("lets explicit options override memory and keeps unrelated options", () => {
+    const explicit = [
+      { id: "reasoning_effort", value: "low" },
+      { id: "cyberAccessProgram", value: "standard" },
+    ];
+    const unrelated = { id: "service_tier", value: "fast" };
+    expect(
+      mergeRememberedModelOptions(
+        { ...selection, options: explicit },
+        [reasoning, { id: "cyberAccessProgram", value: "daybreakBlue" }, unrelated],
+        catalog(["daybreakBlue", "daybreakRed"]),
+      ).options,
+    ).toEqual([unrelated, ...explicit]);
+  });
+
+  it.each([
+    { ...selection, instanceId: ProviderInstanceId.make("other-codex") },
+    { ...selection, model: "other-model" },
+  ])("does not borrow another account or model's access: %j", (picked) => {
+    expect(
+      mergeRememberedModelOptions(
+        picked,
+        [reasoning, { id: "cyberAccessProgram", value: "daybreakBlue" }],
+        catalog(["daybreakBlue"]),
+      ).options,
+    ).toEqual([reasoning]);
+  });
+});
 
 describe("instance-scoped model selection", () => {
   it("preserves server-provided legacy model metadata", () => {

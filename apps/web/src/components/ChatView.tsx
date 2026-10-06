@@ -331,7 +331,10 @@ import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations"
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useRemoveClonedProject } from "../hooks/useRemoveClonedProject";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
-import { resolveAppModelSelectionForInstance } from "../modelSelection";
+import {
+  mergeRememberedModelOptions,
+  resolveAppModelSelectionForInstance,
+} from "../modelSelection";
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
@@ -10371,12 +10374,11 @@ export default function ChatView(props: ChatViewProps) {
         useComposerDraftStore.getState().stickyOptionsByModelByProvider[instanceId]?.[
           resolvedModel
         ];
-      const explicitIds = new Set(selection.options?.map((option) => option.id));
-      const nextOptions = [
-        ...(rememberedOptions ?? []).filter((option) => !explicitIds.has(option.id)),
-        ...(selection.options ?? []),
-      ];
-      const nextModelSelection = createModelSelection(instanceId, resolvedModel, nextOptions);
+      const nextModelSelection = mergeRememberedModelOptions(
+        { ...selection, model: resolvedModel },
+        rememberedOptions,
+        entry,
+      );
       const modelChangeBlockReason = getStartedThreadModelChangeBlockReason({
         providers: providerStatuses,
         hasStartedSession: activeRuntime !== null,

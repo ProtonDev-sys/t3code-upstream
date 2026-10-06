@@ -5821,20 +5821,22 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
           Effect.gen(function* () {
             const threadId = yield* getNativeThreadId(turnInput.providerThread);
             const mcpSession = McpProviderSession.readMcpProviderSession(turnInput.threadId);
-            const models = adapterOptions.models === undefined ? [] : yield* adapterOptions.models;
             const selection = turnInput.modelSelection;
+            const models =
+              selection.instanceId === adapterOptions.instanceId && adapterOptions.models
+                ? yield* adapterOptions.models
+                : [];
             const daybreak = getCodexDaybreakState(
               models.find((model) => model.slug === selection.model)?.capabilities
                 ?.optionDescriptors,
               getModelSelectionStringOptionValue(selection, "cyberAccessProgram") ?? "standard",
             );
             // Displayed Off must request standard; omission lets Codex choose automatically.
-            const cyberAccessProgram =
-              selection.instanceId === adapterOptions.instanceId && daybreak
-                ? daybreak.checked
-                  ? daybreak.enabledValue
-                  : "standard"
-                : undefined;
+            const cyberAccessProgram = daybreak
+              ? daybreak.checked
+                ? daybreak.enabledValue
+                : "standard"
+              : undefined;
             const turnStartParams = yield* buildCodexTurnStartParams({
               nativeThreadId: threadId,
               codexInput,
