@@ -16,6 +16,7 @@ import {
 function modelOption(
   model: string,
   options: ReadonlyArray<ProviderOptionSelection> = [],
+  programs?: ReadonlyArray<string>,
 ): ModelOption {
   return {
     key: `codex:${model}`,
@@ -26,7 +27,19 @@ function modelOption(
     providerDriver: "codex",
     isDefault: false,
     isLegacy: false,
-    capabilities: null,
+    capabilities: programs
+      ? {
+          optionDescriptors: [
+            {
+              id: "cyberAccessProgram",
+              label: "Daybreak",
+              type: "select",
+              options: ["standard", ...programs].map((id) => ({ id, label: id })),
+              currentValue: "standard",
+            },
+          ],
+        }
+      : null,
     selection: {
       instanceId: ProviderInstanceId.make("codex"),
       model,
@@ -123,20 +136,7 @@ describe("thread settings sheet state", () => {
 
   it("refreshes model capabilities while preserving staged options on another press", () => {
     const pending = modelOption("gpt-next", [{ id: "effort", value: "high" }]);
-    const refreshed: ModelOption = {
-      ...modelOption("gpt-next"),
-      capabilities: {
-        optionDescriptors: [
-          {
-            id: "cyberAccessProgram",
-            label: "Daybreak",
-            type: "select",
-            options: ["standard", "daybreakBlue"].map((id) => ({ id, label: id })),
-            currentValue: "standard",
-          },
-        ],
-      },
-    };
+    const refreshed = modelOption("gpt-next", [], ["daybreakBlue"]);
 
     expect(
       pendingModelAfterPress({
@@ -160,20 +160,11 @@ describe("thread settings sheet state", () => {
   });
 
   it("applies Daybreak when a model is chosen while preserving other options", () => {
-    const model: ModelOption = {
-      ...modelOption("gpt-test", [{ id: "reasoningEffort", value: "high" }]),
-      capabilities: {
-        optionDescriptors: [
-          {
-            id: "cyberAccessProgram",
-            label: "Daybreak",
-            type: "select",
-            options: ["standard", "daybreakBlue", "daybreakRed"].map((id) => ({ id, label: id })),
-            currentValue: "standard",
-          },
-        ],
-      },
-    };
+    const model = modelOption(
+      "gpt-test",
+      [{ id: "reasoningEffort", value: "high" }],
+      ["daybreakBlue", "daybreakRed"],
+    );
     for (const program of ["daybreakBlue", "daybreakRed", "standard"]) {
       const pending = pendingModelAfterPress({
         current: null,
@@ -193,19 +184,7 @@ describe("thread settings sheet state", () => {
     expect(model.selection.options).toEqual([{ id: "reasoningEffort", value: "high" }]);
     expect(getModelDaybreakToggleState({ ...model, providerDriver: "claudeAgent" })).toBeNull();
     expect(getModelDaybreakToggleState({ ...model, isUnavailable: true })).toBeNull();
-    const blueOnly = {
-      ...model,
-      capabilities: {
-        optionDescriptors: model.capabilities!.optionDescriptors!.map((descriptor) =>
-          descriptor.type === "select"
-            ? {
-                ...descriptor,
-                options: descriptor.options.filter((option) => option.id !== "daybreakRed"),
-              }
-            : descriptor,
-        ),
-      },
-    };
+    const blueOnly = modelOption("gpt-test", model.selection.options, ["daybreakBlue"]);
     const staged: ModelOption = {
       ...model,
       selection: {

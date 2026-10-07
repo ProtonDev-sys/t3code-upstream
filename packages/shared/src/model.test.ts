@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import {
-  ProviderDriverKind,
-  ProviderInstanceId,
-  type ModelCapabilities,
-  type ProviderOptionDescriptor,
-} from "@t3tools/contracts";
+import { ProviderDriverKind, ProviderInstanceId, type ModelCapabilities } from "@t3tools/contracts";
 
 import {
   applyClaudePromptEffortPrefix,
@@ -28,53 +23,46 @@ import {
   modelSelectionsEqual,
 } from "./model.ts";
 
-describe("Daybreak toggle state", () => {
-  it("requires an advertised program and standard treatment", () => {
-    expect(getCodexDaybreakState([])).toBeNull();
-  });
+describe("Daybreak state", () => {
   it.each([
     [[], "standard", null],
     [["daybreakBlue"], "standard", null],
     [
       ["standard", "daybreakRed", "daybreakBlue"],
       "standard",
-      { checked: false, enabledValue: "daybreakBlue", programs: ["daybreakBlue", "daybreakRed"] },
+      { program: "standard", programs: ["daybreakBlue", "daybreakRed"] },
     ],
     [
       ["standard", "daybreakBlue"],
       "daybreakBlue",
-      { checked: true, enabledValue: "daybreakBlue", programs: ["daybreakBlue"] },
+      { program: "daybreakBlue", programs: ["daybreakBlue"] },
     ],
     [
       ["standard", "daybreakRed"],
       "daybreakRed",
-      { checked: true, enabledValue: "daybreakRed", programs: ["daybreakRed"] },
+      { program: "daybreakRed", programs: ["daybreakRed"] },
     ],
-    [
-      ["standard", "daybreakRed"],
-      "standard",
-      { checked: false, enabledValue: "daybreakRed", programs: ["daybreakRed"] },
-    ],
+    [["standard", "daybreakRed"], "standard", { program: "standard", programs: ["daybreakRed"] }],
     [
       ["standard", "daybreakRed"],
       "daybreakBlue",
-      { checked: false, enabledValue: "daybreakRed", programs: ["daybreakRed"] },
+      { program: "standard", programs: ["daybreakRed"] },
     ],
     [
       ["standard", "daybreakBlue", "daybreakRed"],
       "daybreakRed",
-      { checked: true, enabledValue: "daybreakRed", programs: ["daybreakBlue", "daybreakRed"] },
+      { program: "daybreakRed", programs: ["daybreakBlue", "daybreakRed"] },
     ],
   ])("resolves advertised %j with saved %s", (programs, currentValue, expected) => {
     const descriptors = [
       {
         id: "cyberAccessProgram",
         label: "Daybreak",
-        type: "select",
+        type: "select" as const,
         options: programs.map((id) => ({ id, label: id })),
         currentValue,
       },
-    ] satisfies ReadonlyArray<ProviderOptionDescriptor>;
+    ];
     expect(getCodexDaybreakState(descriptors)).toEqual(expected);
     expect(
       getCodexDaybreakState([{ ...descriptors[0]!, currentValue: "daybreakBlue" }], currentValue),

@@ -281,10 +281,8 @@ export function getCodexDaybreakState(
   );
   if (programs.length === 0) return null;
   value ??= getProviderOptionCurrentValue(descriptor);
-  const selected = programs.find((program) => program === value) ?? null;
   return {
-    checked: selected !== null,
-    enabledValue: selected ?? programs[0]!,
+    program: programs.find((program) => program === value) ?? "standard",
     programs,
   } as const;
 }

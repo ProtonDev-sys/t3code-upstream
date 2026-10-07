@@ -312,8 +312,7 @@ type ThreadSettingsSessionValue = {
   readonly runtimeModeChoices: ReturnType<typeof runtimeModeChoicesForSupportedModes>;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
   readonly displayedDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
-  readonly daybreak: boolean;
-  readonly daybreakPrograms: ReadonlyArray<string>;
+  readonly daybreakPrograms: ReadonlySet<string>;
   readonly selectedDaybreakProgram: string;
   readonly setDaybreakProgram: (program: string) => void;
   readonly displayedModelSelection: ModelSelection | null;
@@ -371,10 +370,9 @@ function ThreadSettingsSessionProvider(
   );
   const [showLegacyToggle, setShowLegacyToggle] = useState(false);
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
-  const [daybreakProgram, setDaybreakProgram] = useState<string>(() => {
-    const state = getCodexDaybreakState(props.optionDescriptors);
-    return state?.checked ? state.enabledValue : "standard";
-  });
+  const [daybreakProgram, setDaybreakProgram] = useState<string>(
+    () => getCodexDaybreakState(props.optionDescriptors)?.program ?? "standard",
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [providerExpansionOverrides, setProviderExpansionOverrides] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -387,8 +385,8 @@ function ThreadSettingsSessionProvider(
     [props.selectedModel],
   );
   const daybreakPrograms = useMemo(
-    () => [
-      ...new Set(
+    () =>
+      new Set<string>(
         props.providerGroups
           .flatMap((group) => group.models)
           .filter((option) =>
@@ -398,11 +396,9 @@ function ThreadSettingsSessionProvider(
           )
           .flatMap((option) => getModelDaybreakToggleState(option)?.programs ?? []),
       ),
-    ],
     [favoriteKeys, props.providerGroups, providerFilter],
   );
-  const daybreak = daybreakPrograms.length > 0;
-  const selectedDaybreakProgram = daybreakPrograms.some((program) => program === daybreakProgram)
+  const selectedDaybreakProgram = daybreakPrograms.has(daybreakProgram)
     ? daybreakProgram
     : "standard";
   // The list highlights the staged pick; Save turns it into the applied one.
@@ -501,15 +497,15 @@ function ThreadSettingsSessionProvider(
         pendingModelAfterPress({
           current,
           pressed:
-            daybreak && !isApplied(option)
+            daybreakPrograms.size > 0 && !isApplied(option)
               ? { ...option, selection: withRememberedModelOptions(option.selection) }
               : option,
           pressedIsApplied: isApplied(option),
-          ...(daybreak ? { daybreakProgram: selectedDaybreakProgram } : {}),
+          daybreakProgram: daybreakPrograms.size > 0 ? selectedDaybreakProgram : undefined,
         }),
       );
     },
-    [daybreak, selectedDaybreakProgram, isApplied],
+    [daybreakPrograms, selectedDaybreakProgram, isApplied],
   );
 
   const value = useMemo<ThreadSettingsSessionValue>(
@@ -521,7 +517,6 @@ function ThreadSettingsSessionProvider(
       runtimeModeChoices,
       onUpdateRuntimeMode: props.onUpdateRuntimeMode,
       displayedDescriptors,
-      daybreak,
       daybreakPrograms,
       selectedDaybreakProgram,
       setDaybreakProgram,
@@ -551,7 +546,6 @@ function ThreadSettingsSessionProvider(
       commitPendingModel,
       compatibleRuntimeMode,
       displayedDescriptors,
-      daybreak,
       daybreakPrograms,
       selectedDaybreakProgram,
       favoriteKeys,
@@ -792,9 +786,7 @@ function ThreadSettingsOptionsItem(props: {
         layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}
       >
         {session.displayedDescriptors.map((descriptor) => {
-          if (descriptor.id === "cyberAccessProgram") {
-            return null;
-          }
+          if (descriptor.id === "cyberAccessProgram") return null;
           if (descriptor.type === "select") {
             return (
               <Animated.View
@@ -976,7 +968,7 @@ function ThreadSettingsMainContent(props: {
       maintainVisibleContentPosition={THREAD_SETTINGS_MAINTAIN_VISIBLE_CONTENT_POSITION}
       ListHeaderComponent={
         <>
-          {session.daybreak ? (
+          {session.daybreakPrograms.size > 0 ? (
             <View className="mx-4 flex-row items-center justify-between rounded-2xl bg-grouped-card px-4 py-1">
               <Text className="text-sm font-t3-medium text-foreground">Daybreak</Text>
               <SegmentedControl
@@ -988,7 +980,7 @@ function ThreadSettingsMainContent(props: {
                   value,
                   label,
                   accessibilityLabel: `Daybreak ${label}`,
-                  disabled: value !== "standard" && !session.daybreakPrograms.includes(value),
+                  disabled: value !== "standard" && !session.daybreakPrograms.has(value),
                 }))}
               />
             </View>

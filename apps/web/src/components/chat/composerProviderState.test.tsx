@@ -78,40 +78,26 @@ describe("getComposerProviderState", () => {
     { id: "standard", label: "Off", isDefault: true },
     { id: "daybreakBlue", label: "Blue" },
   ]);
-  it.each([true, false])("preserves reasoning when Daybreak availability is %s", (available) => {
-    const options = selections(["cyberAccessProgram", "daybreakBlue"], ["reasoningEffort", "high"]);
-    const state = getComposerProviderState({
-      provider: CODEX,
-      model: MODEL,
-      models: modelWith([
-        ...(available ? [daybreak] : []),
-        selectDescriptor("reasoningEffort", [{ id: "high", label: "High", isDefault: true }]),
-      ]),
-      modelOptions: options,
-      planModeEnabled: true,
-    });
-    expect(state.promptEffort).toBe("high");
-    expect(state.modelOptionsForDispatch).toEqual(available ? options : options.slice(1));
-  });
-
-  it.each([false, true])(
-    "does not treat service tier as reasoning with Daybreak %s",
-    (available) => {
-      const options = selections(["serviceTier", "priority"]);
+  it.each([
+    ["reasoningEffort", "high", "high"],
+    ["serviceTier", "priority", null],
+  ] as const)("keeps %s independent of Daybreak access", (id, value, effort) => {
+    for (const available of [true, false]) {
+      const options = selections(["cyberAccessProgram", "daybreakBlue"], [id, value]);
       const state = getComposerProviderState({
         provider: CODEX,
         model: MODEL,
         models: modelWith([
-          selectDescriptor("serviceTier", [{ id: "priority", label: "Fast" }]),
           ...(available ? [daybreak] : []),
+          selectDescriptor(id, [{ id: value, label: value, isDefault: true }]),
         ]),
         modelOptions: options,
         planModeEnabled: true,
       });
-      expect(state.promptEffort).toBeNull();
-      expect(state.modelOptionsForDispatch).toEqual(options);
-    },
-  );
+      expect(state.promptEffort).toBe(effort);
+      expect(state.modelOptionsForDispatch).toEqual(available ? options : options.slice(1));
+    }
+  });
 
   it("derives a stable prompt injection state for ordinary prompt edits", () => {
     expect(getComposerPromptInjectionState("Investigate this failure")).toBe("none");

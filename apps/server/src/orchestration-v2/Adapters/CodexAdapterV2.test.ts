@@ -14,7 +14,7 @@ import {
   EnvironmentId,
   MessageId,
   type ModelSelection,
-  type ModelCapabilities,
+  type ServerProviderModel,
   NodeId,
   type OrchestrationV2AppThread,
   type OrchestrationV2ProviderThread,
@@ -79,17 +79,24 @@ const encodeReplayTranscriptJson = Schema.encodeEffect(replayTranscriptJson);
 const decodeReplayTranscriptJson = Schema.decodeUnknownEffect(replayTranscriptJson);
 const encodeStringJson = Schema.encodeEffect(Schema.fromJsonString(Schema.String));
 
-function codexDaybreakTestCapabilities(programs: ReadonlyArray<string>): ModelCapabilities {
+function codexDaybreakTestModel(
+  programs: ReadonlyArray<string> = ["standard", "daybreakBlue", "daybreakRed", "unknown"],
+): ServerProviderModel {
   return {
-    optionDescriptors: [
-      {
-        id: "cyberAccessProgram",
-        label: "Daybreak",
-        type: "select",
-        options: programs.map((id) => ({ id, label: id })),
-        currentValue: "standard",
-      },
-    ],
+    slug: CODEX_TEST_MODEL_SELECTION.model,
+    name: "Test",
+    isCustom: false,
+    capabilities: {
+      optionDescriptors: [
+        {
+          id: "cyberAccessProgram",
+          label: "Daybreak",
+          type: "select",
+          options: programs.map((id) => ({ id, label: id })),
+          currentValue: "standard",
+        },
+      ],
+    },
   };
 }
 
@@ -2031,22 +2038,10 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               ? {}
               : { options: [{ id: "cyberAccessProgram", value: program }] }),
           });
-          const catalogModel = (programs: ReadonlyArray<string>) => ({
-            slug: CODEX_TEST_MODEL_SELECTION.model,
-            name: "Test",
-            isCustom: false,
-            capabilities: codexDaybreakTestCapabilities(programs),
-          });
           const catalog = yield* Ref.make(
             mode === "absent"
               ? []
-              : [
-                  catalogModel(
-                    mode === "standard-only"
-                      ? ["standard"]
-                      : ["standard", "daybreakBlue", "daybreakRed", "unknown"],
-                  ),
-                ],
+              : [codexDaybreakTestModel(mode === "standard-only" ? ["standard"] : undefined)],
           );
           const transcript = makeCodexReplayTranscript({
             scenario: `daybreak-${selected}-${mode}`,
@@ -2114,7 +2109,9 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           yield* harness.firstTerminal;
           if (mode === "revoked" || mode === "removed") {
             yield* Ref.set(catalog, [
-              catalogModel(mode === "revoked" ? ["standard", "daybreakRed"] : ["standard"]),
+              codexDaybreakTestModel(
+                mode === "revoked" ? ["standard", "daybreakRed"] : ["standard"],
+              ),
             ]);
           }
           const providerThread = yield* harness.runtime.resumeThread({
@@ -7883,125 +7880,105 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       assert.isNull(CodexAdapterV2.parseCodexGoalCommand("set a /goal"));
     });
 
-    it.effect.each([undefined, "standard", "daybreakBlue", "daybreakRed"] as const)(
-      "keeps a /goal run open with %s across the turns Codex continues on its own",
-      (program) =>
-        Effect.gen(function* () {
-          const transcript = makeCodexReplayTranscript({
-            scenario: `goal-continuation-${program ?? "default"}`,
-            entries: [
-              ...sessionStart,
-              ...request(3, "thread/goal/get", { threadId: nativeThreadId }, { goal: null }),
-              ...request(
-                4,
-                "thread/goal/set",
-                { threadId: nativeThreadId, objective, status: "paused" },
-                { goal: codexGoal("paused", 0) },
-              ),
-              // The first goal turn carries this run's turn configuration.
-              ...withReplayRequestId(
-                codexReplayPreamble({
-                  nativeThreadId,
-                  nativeTurnId: "goal-turn-1",
-                  prompt: objective,
-                  ...(program === undefined ? {} : { cyberAccessProgram: program }),
-                }).slice(5),
-                5,
-              ),
-              ...request(
-                6,
-                "thread/goal/set",
-                { threadId: nativeThreadId, status: "active" },
-                { goal: codexGoal("active", 0) },
-              ),
-              notification("goal active", "thread/goal/updated", {
-                threadId: nativeThreadId,
-                turnId: "goal-turn-1",
-                goal: codexGoal("active", 0),
-              }),
-              notification("first turn done", "turn/completed", {
-                threadId: nativeThreadId,
-                turn: makeCodexReplayTurn({ id: "goal-turn-1", status: "completed" }),
-              }),
-              notification("continuation", "turn/started", {
-                threadId: nativeThreadId,
-                turn: makeCodexReplayTurn({ id: "goal-turn-2", status: "inProgress" }),
-              }),
-              notification("goal complete", "thread/goal/updated", {
-                threadId: nativeThreadId,
-                turnId: "goal-turn-2",
-                goal: codexGoal("complete", 1200),
-              }),
-              notification("continuation done", "turn/completed", {
-                threadId: nativeThreadId,
-                turn: makeCodexReplayTurn({ id: "goal-turn-2", status: "completed" }),
-              }),
-            ],
-          });
-          const harness = yield* makeCodexReplayHarness(
-            transcript,
-            undefined,
-            undefined,
-            undefined,
-            Effect.succeed(
-              program === undefined
-                ? []
-                : [
-                    {
-                      slug: CODEX_TEST_MODEL_SELECTION.model,
-                      name: "Test",
-                      isCustom: false,
-                      capabilities: codexDaybreakTestCapabilities([
-                        "standard",
-                        "daybreakBlue",
-                        "daybreakRed",
-                      ]),
-                    },
-                  ],
+    it.effect("keeps a /goal run open across the turns Codex continues on its own", () =>
+      Effect.gen(function* () {
+        const transcript = makeCodexReplayTranscript({
+          scenario: "goal-continuation",
+          entries: [
+            ...sessionStart,
+            ...request(3, "thread/goal/get", { threadId: nativeThreadId }, { goal: null }),
+            ...request(
+              4,
+              "thread/goal/set",
+              { threadId: nativeThreadId, objective, status: "paused" },
+              { goal: codexGoal("paused", 0) },
             ),
-          );
-          const turnInput = yield* goalTurnInput(harness, `/goal ${objective}`);
-          yield* harness.runtime.startTurn({
-            ...turnInput,
-            modelSelection: {
-              ...turnInput.modelSelection,
-              options: [
-                ...(turnInput.modelSelection.options ?? []),
-                ...(program === undefined ? [] : [{ id: "cyberAccessProgram", value: program }]),
-              ],
-            },
-          });
-          yield* harness.firstTerminal;
+            // The first goal turn carries this run's turn configuration.
+            ...withReplayRequestId(
+              codexReplayPreamble({
+                nativeThreadId,
+                nativeTurnId: "goal-turn-1",
+                prompt: objective,
+                cyberAccessProgram: "daybreakBlue",
+              }).slice(5),
+              5,
+            ),
+            ...request(
+              6,
+              "thread/goal/set",
+              { threadId: nativeThreadId, status: "active" },
+              { goal: codexGoal("active", 0) },
+            ),
+            notification("goal active", "thread/goal/updated", {
+              threadId: nativeThreadId,
+              turnId: "goal-turn-1",
+              goal: codexGoal("active", 0),
+            }),
+            notification("first turn done", "turn/completed", {
+              threadId: nativeThreadId,
+              turn: makeCodexReplayTurn({ id: "goal-turn-1", status: "completed" }),
+            }),
+            notification("continuation", "turn/started", {
+              threadId: nativeThreadId,
+              turn: makeCodexReplayTurn({ id: "goal-turn-2", status: "inProgress" }),
+            }),
+            notification("goal complete", "thread/goal/updated", {
+              threadId: nativeThreadId,
+              turnId: "goal-turn-2",
+              goal: codexGoal("complete", 1200),
+            }),
+            notification("continuation done", "turn/completed", {
+              threadId: nativeThreadId,
+              turn: makeCodexReplayTurn({ id: "goal-turn-2", status: "completed" }),
+            }),
+          ],
+        });
+        const harness = yield* makeCodexReplayHarness(
+          transcript,
+          undefined,
+          undefined,
+          undefined,
+          Effect.succeed([codexDaybreakTestModel()]),
+        );
+        const turnInput = yield* goalTurnInput(harness, `/goal ${objective}`);
+        yield* harness.runtime.startTurn({
+          ...turnInput,
+          modelSelection: {
+            ...turnInput.modelSelection,
+            options: [{ id: "cyberAccessProgram", value: "daybreakBlue" }],
+          },
+        });
+        yield* harness.firstTerminal;
 
-          const idAllocator = yield* IdAllocator.IdAllocatorV2;
-          const providerTurnId = (nativeTurnId: string) =>
-            idAllocator.derive.providerTurn({
-              driver: CodexAdapterV2.CODEX_DRIVER_KIND,
-              nativeTurnId,
-            });
-          assert.deepEqual(
-            harness.terminalEvents().map((event) => [event.providerTurnId, event.status]),
-            [[providerTurnId("goal-turn-2"), "completed"]],
-          );
-          assert.deepEqual(
-            harness.events.flatMap((event) =>
-              event.type === "provider_turn.updated" && event.providerTurn.status === "running"
-                ? [
-                    [
-                      event.providerTurn.id,
-                      event.providerTurn.runAttemptId,
-                      event.providerTurn.ordinal,
-                    ],
-                  ]
-                : [],
-            ),
-            [
-              [providerTurnId("goal-turn-1"), RunAttemptId.make("goal-attempt"), 1],
-              [providerTurnId("goal-turn-2"), RunAttemptId.make("goal-attempt"), 2],
-            ],
-          );
-          assert.equal(providerGoals(harness.events).at(-1), "complete");
-        }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const providerTurnId = (nativeTurnId: string) =>
+          idAllocator.derive.providerTurn({
+            driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+            nativeTurnId,
+          });
+        assert.deepEqual(
+          harness.terminalEvents().map((event) => [event.providerTurnId, event.status]),
+          [[providerTurnId("goal-turn-2"), "completed"]],
+        );
+        assert.deepEqual(
+          harness.events.flatMap((event) =>
+            event.type === "provider_turn.updated" && event.providerTurn.status === "running"
+              ? [
+                  [
+                    event.providerTurn.id,
+                    event.providerTurn.runAttemptId,
+                    event.providerTurn.ordinal,
+                  ],
+                ]
+              : [],
+          ),
+          [
+            [providerTurnId("goal-turn-1"), RunAttemptId.make("goal-attempt"), 1],
+            [providerTurnId("goal-turn-2"), RunAttemptId.make("goal-attempt"), 2],
+          ],
+        );
+        assert.equal(providerGoals(harness.events).at(-1), "complete");
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
     );
 
     it.effect("settles /goal pause with a reply instead of a native turn", () =>

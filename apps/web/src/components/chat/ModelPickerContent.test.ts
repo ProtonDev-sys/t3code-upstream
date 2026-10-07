@@ -40,73 +40,51 @@ describe("Daybreak picker mode", () => {
     model: "luna",
     daybreakPrograms: ["daybreakBlue"],
   };
+  const claude = ProviderInstanceId.make("claude");
+  const blue = ["daybreakBlue"];
+  const both = [...blue, "daybreakRed"];
+  const favorites = new Set([`${luna.instanceId}:luna`]);
+  const models = [
+    { instanceId: luna.instanceId, slug: luna.model, daybreakPrograms: blue },
+    { instanceId: luna.instanceId, slug: "astra" },
+    { instanceId: claude, slug: "fable" },
+    {
+      instanceId: ProviderInstanceId.make("codex_red"),
+      slug: "sol",
+      daybreakPrograms: ["daybreakRed"],
+    },
+  ];
+  const reasoning = { id: "reasoningEffort", value: "high" };
+  const selection = (value: string) => ({
+    instanceId: luna.instanceId,
+    model: luna.model,
+    options: [{ ...reasoning }, { id: "cyberAccessProgram", value }],
+  });
 
-  it("offers only the current account's programs in eligible Codex views or Favorites", () => {
-    const models = [
-      { instanceId: luna.instanceId, slug: "luna", daybreakPrograms: ["daybreakBlue"] },
-      { instanceId: luna.instanceId, slug: "astra" },
-      { instanceId: ProviderInstanceId.make("claude"), slug: "fable" },
-    ];
-    const favorites = new Set([`${luna.instanceId}:luna`]);
-    expect(modelPickerDaybreakPrograms(models, luna.instanceId, favorites)).toEqual([
-      "daybreakBlue",
-    ]);
-    expect(modelPickerDaybreakPrograms(models, "favorites", favorites)).toEqual(["daybreakBlue"]);
-    expect(
-      modelPickerDaybreakPrograms(models, ProviderInstanceId.make("claude"), favorites),
-    ).toEqual([]);
-    expect(modelPickerDaybreakPrograms(models, "favorites", new Set())).toEqual([]);
-    expect(
-      modelPickerDaybreakPrograms(
-        [
-          ...models,
-          { instanceId: luna.instanceId, slug: "sol", daybreakPrograms: ["daybreakRed"] },
-        ],
-        luna.instanceId,
-        favorites,
-      ),
-    ).toEqual(["daybreakBlue", "daybreakRed"]);
-    const otherAccount = [
-      ...models,
-      {
-        instanceId: ProviderInstanceId.make("codex_red"),
-        slug: "sol",
-        daybreakPrograms: ["daybreakRed"],
-      },
-    ];
-    expect(modelPickerDaybreakPrograms(otherAccount, luna.instanceId, favorites)).toEqual([
-      "daybreakBlue",
-    ]);
-    expect(modelPickerDaybreakPrograms(otherAccount, luna.instanceId, favorites, true)).toEqual([
-      "daybreakBlue",
-      "daybreakRed",
-    ]);
-    expect(
-      modelPickerDaybreakPrograms(
-        [{ ...models[0]!, daybreakPrograms: ["daybreakBlue", "daybreakRed"] }],
-        "favorites",
-        favorites,
-      ),
-    ).toEqual(["daybreakBlue", "daybreakRed"]);
+  it.each([
+    [luna.instanceId, favorites, false, blue],
+    ["favorites", favorites, false, blue],
+    [claude, favorites, false, []],
+    ["favorites", new Set<string>(), false, []],
+    [luna.instanceId, favorites, true, both],
+  ] as const)("scopes access to %s (case %#)", (instance, saved, searching, expected) => {
+    expect(modelPickerDaybreakPrograms(models, instance, saved, searching)).toEqual(expected);
+  });
+
+  it.each([
+    [
+      [...models, { instanceId: luna.instanceId, slug: "sol", daybreakPrograms: ["daybreakRed"] }],
+      luna.instanceId,
+    ],
+    [[{ ...models[0]!, daybreakPrograms: both }], "favorites"],
+  ] as const)("unions eligible programs in %s", (catalog, instance) => {
+    expect(modelPickerDaybreakPrograms(catalog, instance, favorites)).toEqual(both);
   });
 
   it("sets the native program only in the chosen selection, retaining reasoning", () => {
-    const current = {
-      instanceId: luna.instanceId,
-      model: "luna",
-      options: [
-        { id: "reasoningEffort", value: "high" },
-        { id: "cyberAccessProgram", value: "standard" },
-      ],
-    };
+    const current = selection("standard");
     const selected = modelPickerSelection(luna, current, "daybreakBlue");
-    expect(selected).toEqual({
-      ...current,
-      options: [
-        { id: "reasoningEffort", value: "high" },
-        { id: "cyberAccessProgram", value: "daybreakBlue" },
-      ],
-    });
+    expect(selected).toEqual(selection("daybreakBlue"));
     expect(current.options[1]?.value).toBe("standard");
     expect(
       modelPickerSelection(
@@ -117,26 +95,19 @@ describe("Daybreak picker mode", () => {
     ).toBeNull();
     expect(modelPickerSelection(luna, selected, "standard")).toEqual(current);
     expect(modelPickerSelection(luna, current, "daybreakRed")).toBeNull();
-    const both = { ...luna, daybreakPrograms: ["daybreakBlue", "daybreakRed"] };
-    const red = modelPickerSelection(both, selected, "daybreakRed");
-    expect(red?.options).toEqual([
-      { id: "reasoningEffort", value: "high" },
-      { id: "cyberAccessProgram", value: "daybreakRed" },
-    ]);
-    expect(modelPickerSelection(both, red, "daybreakBlue")).toEqual(selected);
-    expect(modelPickerSelection(both, red, undefined)).toBe(red);
+    const target = { ...luna, daybreakPrograms: both };
+    const red = modelPickerSelection(target, selected, "daybreakRed");
+    expect(red).toEqual(selection("daybreakRed"));
+    expect(modelPickerSelection(target, red, "daybreakBlue")).toEqual(selected);
+    expect(modelPickerSelection(target, red, undefined)).toBe(red);
   });
 
   it.each(["daybreakBlue", "daybreakRed"])(
     "clears revoked %s access when reselecting the same model, retaining other options",
     (program) => {
-      const options = [
-        { id: "reasoningEffort", value: "high" },
-        { id: "serviceTier", value: "fast" },
-      ];
+      const options = [reasoning, { id: "serviceTier", value: "fast" }];
       const current = {
-        instanceId: luna.instanceId,
-        model: luna.model,
+        ...selection(program),
         options: [...options, { id: "cyberAccessProgram", value: program }],
       };
       for (const daybreakPrograms of [undefined, []]) {

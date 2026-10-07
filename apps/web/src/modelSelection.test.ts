@@ -71,27 +71,22 @@ function settingsWithProviderInstances(): UnifiedSettings {
 describe("remembered model options", () => {
   const selection = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.5");
   const reasoning = { id: "reasoning_effort", value: "high" };
+  const base = provider({ instanceId: "codex", models: [selection.model] });
+  const daybreak = (programs: ReadonlyArray<string>) => ({
+    id: "cyberAccessProgram",
+    label: "Daybreak",
+    type: "select" as const,
+    options: ["standard", ...programs].map((id) => ({ id, label: id })),
+    currentValue: "standard",
+  });
   const catalog = (programs?: ReadonlyArray<string>): ServerProvider => ({
-    ...provider({ instanceId: "codex" }),
+    ...base,
     models: [
       {
-        slug: selection.model,
-        name: selection.model,
-        isCustom: false,
-        capabilities:
-          programs === undefined
-            ? {}
-            : {
-                optionDescriptors: [
-                  {
-                    id: "cyberAccessProgram",
-                    label: "Daybreak",
-                    type: "select",
-                    options: ["standard", ...programs].map((id) => ({ id, label: id })),
-                    currentValue: "standard",
-                  },
-                ],
-              },
+        ...base.models[0]!,
+        capabilities: {
+          optionDescriptors: programs === undefined ? [] : [daybreak(programs)],
+        },
       },
     ],
   });

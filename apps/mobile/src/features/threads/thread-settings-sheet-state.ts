@@ -1,10 +1,6 @@
 import type { ModelOption, ProviderGroup } from "../../lib/modelOptions";
 import type { ProviderInstanceId } from "@t3tools/contracts";
-import {
-  getCodexDaybreakState,
-  getModelSelectionStringOptionValue,
-  withCodexDaybreakProgram,
-} from "@t3tools/shared/model";
+import { getCodexDaybreakState, withCodexDaybreakProgram } from "@t3tools/shared/model";
 
 export type ModelFavorite = {
   readonly provider: ProviderInstanceId;
@@ -99,10 +95,7 @@ export function pendingModelAfterPress(input: {
 
 export function getModelDaybreakToggleState(model: ModelOption) {
   return model.providerDriver === "codex" && !model.isUnavailable && model.capabilities
-    ? getCodexDaybreakState(
-        model.capabilities.optionDescriptors,
-        getModelSelectionStringOptionValue(model.selection, "cyberAccessProgram"),
-      )
+    ? getCodexDaybreakState(model.capabilities.optionDescriptors)
     : null;
 }
 

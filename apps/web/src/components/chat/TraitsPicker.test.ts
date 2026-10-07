@@ -60,17 +60,15 @@ const CONTEXT_WINDOW = selectDescriptor(
 
 const CODEX = ProviderDriverKind.make("codex");
 
-function daybreakDescriptor(currentValue: "standard" | "daybreakBlue" | "daybreakRed") {
-  return selectDescriptor(
-    "cyberAccessProgram",
-    [
-      { id: "standard", label: "Off", isDefault: true },
-      { id: "daybreakBlue", label: "Blue" },
-      { id: "daybreakRed", label: "Red" },
-    ],
-    currentValue,
-  );
-}
+const DAYBREAK = selectDescriptor(
+  "cyberAccessProgram",
+  [
+    { id: "standard", label: "Off", isDefault: true },
+    { id: "daybreakBlue", label: "Blue" },
+    { id: "daybreakRed", label: "Red" },
+  ],
+  "daybreakBlue",
+);
 
 function display(descriptors: ReadonlyArray<ProviderOptionDescriptor>) {
   return buildTraitsTriggerDisplay({
@@ -83,9 +81,7 @@ function display(descriptors: ReadonlyArray<ProviderOptionDescriptor>) {
 
 describe("buildTraitsTriggerDisplay", () => {
   it("leaves Daybreak out of the reasoning and speed trigger", () => {
-    expect(
-      display([EFFORT, serviceTierDescriptor("priority"), daybreakDescriptor("daybreakBlue")]),
-    ).toEqual({
+    expect(display([EFFORT, serviceTierDescriptor("priority"), DAYBREAK])).toEqual({
       label: "High Fast",
     });
   });
@@ -288,7 +284,7 @@ describe("shouldRenderTraitsControls", () => {
             slug: "daybreak-model",
             name: "Daybreak Model",
             isCustom: false,
-            capabilities: { optionDescriptors: [daybreakDescriptor("standard")] },
+            capabilities: { optionDescriptors: [DAYBREAK] },
           },
         ],
         model: "daybreak-model",

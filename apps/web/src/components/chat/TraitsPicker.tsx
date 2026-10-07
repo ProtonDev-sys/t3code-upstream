@@ -501,9 +501,7 @@ export function buildTraitsTriggerDisplay(input: {
   let reasoningLabelIndex = -1;
   const labels: Array<string> = [];
   for (const descriptor of input.descriptors) {
-    if (descriptor.id === "cyberAccessProgram") {
-      continue;
-    }
+    if (descriptor.id === "cyberAccessProgram") continue;
     if (descriptor.id === "fastMode" && descriptor.type === "boolean") {
       speedLabel = descriptor.currentValue === true ? "Fast" : null;
       fastModeFallbackLabel = speedLabel ?? "Normal";

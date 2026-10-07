@@ -372,27 +372,19 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     () => new Map(instanceEntries.map((entry) => [entry.instanceId, entry])),
     [instanceEntries],
   );
-  const daybreakByModel = useMemo(() => {
-    const states = new Map<string, NonNullable<ReturnType<typeof getCodexDaybreakState>>>();
-    for (const entry of instanceEntries) {
-      if (entry.driverKind !== "codex") continue;
-      for (const model of entry.models) {
-        const state = getCodexDaybreakState(
-          model.capabilities?.optionDescriptors,
-          props.modelSelection?.instanceId === entry.instanceId &&
-            props.modelSelection.model === model.slug
-            ? getModelSelectionStringOptionValue(props.modelSelection, "cyberAccessProgram")
-            : undefined,
-        );
-        if (state) states.set(modelPickerModelKey(entry.instanceId, model.slug), state);
-      }
-    }
-    return states;
-  }, [instanceEntries, props.modelSelection]);
-  const [daybreakProgram, setDaybreakProgram] = useState<string>(() => {
-    const state = activeModelKey && daybreakByModel.get(activeModelKey);
-    return state && state.checked ? state.enabledValue : "standard";
-  });
+  const [daybreakProgram, setDaybreakProgram] = useState<string>(
+    () =>
+      getCodexDaybreakState(
+        activeEntry?.driverKind === "codex"
+          ? activeEntry.models.find((model) => model.slug === activeModelSlug)?.capabilities
+              ?.optionDescriptors
+          : undefined,
+        props.modelSelection?.instanceId === props.activeInstanceId &&
+          props.modelSelection.model === activeModelSlug
+          ? getModelSelectionStringOptionValue(props.modelSelection, "cyberAccessProgram")
+          : undefined,
+      )?.program ?? "standard",
+  );
   const matchesLockedProvider = useCallback(
     (entry: Pick<ProviderInstanceEntry, "driverKind" | "continuationGroupKey">): boolean => {
       if (props.lockedProvider === null) return true;
@@ -439,6 +431,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         // its models — stale options shouldn't appear in the picker.
         continue;
       }
+      const descriptorsBySlug =
+        entry.driverKind === "codex"
+          ? new Map(
+              entry.models.map(({ slug, capabilities }) => [slug, capabilities?.optionDescriptors]),
+            )
+          : null;
       for (const model of models) {
         if (
           !shouldIncludeModelPickerOption({
@@ -462,7 +460,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           driverKind: entry.driverKind,
           daybreakPrograms: model.isUnavailable
             ? undefined
-            : daybreakByModel.get(modelPickerModelKey(instanceId, model.slug))?.programs,
+            : getCodexDaybreakState(descriptorsBySlug?.get(model.slug))?.programs,
           instanceDisplayName: entry.displayName,
           ...(entry.accentColor ? { instanceAccentColor: entry.accentColor } : {}),
           ...(entry.acpRegistryAgentId ? { acpRegistryAgentId: entry.acpRegistryAgentId } : {}),
@@ -474,13 +472,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       }
     }
     return out;
-  }, [
-    modelOptionsByInstance,
-    entryByInstanceId,
-    props.activeInstanceId,
-    activeModelSlug,
-    daybreakByModel,
-  ]);
+  }, [modelOptionsByInstance, entryByInstanceId, props.activeInstanceId, activeModelSlug]);
   const daybreakPrograms =
     props.modelSelection === undefined
       ? []
@@ -493,7 +485,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const selectedDaybreakProgram = daybreakPrograms.includes(daybreakProgram)
     ? daybreakProgram
     : "standard";
-  const filterDaybreak = selectedDaybreakProgram !== "standard";
 
   const isLocked = props.lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;
@@ -533,9 +524,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   // Filter models based on search query and selected instance
   const filteredModels = useMemo(() => {
-    let result = filterDaybreak
-      ? flatModels.filter((model) => model.daybreakPrograms?.includes(selectedDaybreakProgram))
-      : flatModels;
+    let result =
+      selectedDaybreakProgram !== "standard"
+        ? flatModels.filter((model) => model.daybreakPrograms?.includes(selectedDaybreakProgram))
+        : flatModels;
 
     // Apply tokenized fuzzy search across the combined provider/model search fields.
     if (searchQuery.trim()) {
@@ -632,7 +624,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   }, [
     favoritesSet,
     flatModels,
-    filterDaybreak,
     selectedDaybreakProgram,
     instanceOrder,
     matchesLockedProvider,
@@ -719,15 +710,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           {
             instanceId,
             model: resolvedModel,
-            daybreakPrograms: daybreakByModel.get(modelPickerModelKey(instanceId, resolvedModel))
-              ?.programs,
+            daybreakPrograms: flatModels.find(
+              (model) => model.instanceId === instanceId && model.slug === resolvedModel,
+            )?.daybreakPrograms,
           },
           props.modelSelection,
-          props.modelSelection === undefined
-            ? undefined
-            : filterDaybreak
-              ? selectedDaybreakProgram
-              : "standard",
+          props.modelSelection === undefined ? undefined : selectedDaybreakProgram,
         );
         if (!selection) return;
         if (additive && onToggleModel) {
@@ -741,11 +729,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       entryByInstanceId,
       getModelDisabledReason,
       modelOptionsByInstance,
-      daybreakByModel,
+      flatModels,
       onInstanceModelChange,
       onToggleModel,
       props.modelSelection,
-      filterDaybreak,
       selectedDaybreakProgram,
     ],
   );
@@ -864,13 +851,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return mapping.size > 0 ? mapping : EMPTY_MODEL_JUMP_LABELS;
   }, [keybindings, modelJumpCommandByKey, modelJumpShortcutContext]);
   const modelListExtraData = useMemo(
-    () => ({
-      favoritesSet,
-      modelJumpLabelByKey,
-      activeModelKey,
-      selectedModelKeySet,
-      legacySection,
-    }),
+    () => [favoritesSet, modelJumpLabelByKey, activeModelKey, selectedModelKeySet, legacySection],
     [favoritesSet, modelJumpLabelByKey, activeModelKey, selectedModelKeySet, legacySection],
   );
 
@@ -1108,8 +1089,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                           <div className="min-w-0 flex-1 text-left">
                             <div className="text-xs font-medium leading-snug">Legacy models</div>
                             <div className="mt-1 text-xs font-normal leading-snug text-muted-foreground/70">
-                              {legacySection.legacyModels.length}{" "}
-                              {legacySection.legacyModels.length === 1 ? "model" : "models"}
+                              {legacySection.legacyModels.length} models
                             </div>
                           </div>
                           <ChevronRightIcon

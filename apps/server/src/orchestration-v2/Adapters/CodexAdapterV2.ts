@@ -5881,17 +5881,12 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
               selection.instanceId === adapterOptions.instanceId && adapterOptions.models
                 ? yield* adapterOptions.models
                 : [];
-            const daybreak = getCodexDaybreakState(
+            // Displayed Off must request standard; omission lets Codex choose automatically.
+            const cyberAccessProgram = getCodexDaybreakState(
               models.find((model) => model.slug === selection.model)?.capabilities
                 ?.optionDescriptors,
               getModelSelectionStringOptionValue(selection, "cyberAccessProgram") ?? "standard",
-            );
-            // Displayed Off must request standard; omission lets Codex choose automatically.
-            const cyberAccessProgram = daybreak
-              ? daybreak.checked
-                ? daybreak.enabledValue
-                : "standard"
-              : undefined;
+            )?.program;
             const turnStartParams = yield* buildCodexTurnStartParams({
               nativeThreadId: threadId,
               codexInput,
