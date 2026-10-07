@@ -331,21 +331,17 @@ export function mergeRememberedModelOptions(
   provider: ServerProvider | undefined,
 ): ModelSelection {
   const explicitIds = new Set(selection.options?.map((option) => option.id));
-  const daybreak =
+  const descriptors =
     provider?.instanceId === selection.instanceId && provider.driver === "codex"
-      ? getCodexDaybreakState(
-          provider.models.find((model) => model.slug === selection.model)?.capabilities
-            ?.optionDescriptors,
-        )
-      : null;
+      ? provider.models.find((model) => model.slug === selection.model)?.capabilities
+          ?.optionDescriptors
+      : undefined;
   return createModelSelection(selection.instanceId, selection.model, [
     ...(rememberedOptions ?? []).filter(
       (option) =>
         !explicitIds.has(option.id) &&
         (option.id !== "cyberAccessProgram" ||
-          (daybreak &&
-            (option.value === "standard" ||
-              daybreak.programs.some((program) => program === option.value)))),
+          getCodexDaybreakState(descriptors, option.value)?.program === option.value),
     ),
     ...(selection.options ?? []),
   ]);

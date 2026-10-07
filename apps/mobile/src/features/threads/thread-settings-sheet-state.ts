@@ -62,35 +62,28 @@ export function pendingModelAfterPress(input: {
   readonly daybreakProgram?: string;
 }): ModelOption | null {
   const daybreak = getModelDaybreakToggleState(input.pressed);
-  const selection =
+  const program = daybreak ? input.daybreakProgram : undefined;
+  const previous =
     input.current?.key === input.pressed.key ? input.current.selection : input.pressed.selection;
-  const pressed = {
-    ...input.pressed,
-    selection: {
-      ...selection,
-      options: selection.options?.filter(
-        (option) =>
-          option.id !== "cyberAccessProgram" ||
-          option.value === "standard" ||
-          daybreak?.programs.some((program) => program === option.value),
-      ),
-    },
+  const selection = {
+    ...previous,
+    options: previous.options?.filter(
+      (option) =>
+        option.id !== "cyberAccessProgram" ||
+        option.value === "standard" ||
+        daybreak?.programs.some((program) => program === option.value),
+    ),
   };
   if (
     input.daybreakProgram &&
     input.daybreakProgram !== "standard" &&
     !daybreak?.programs.some((program) => program === input.daybreakProgram)
   )
-    return input.current?.key === input.pressed.key ? pressed : input.current;
-  if (input.pressedIsApplied && (!daybreak || input.daybreakProgram === undefined)) {
-    return null;
-  }
-  return daybreak && input.daybreakProgram !== undefined
-    ? {
-        ...pressed,
-        selection: withCodexDaybreakProgram(pressed.selection, input.daybreakProgram),
-      }
-    : pressed;
+    return input.current?.key === input.pressed.key
+      ? { ...input.pressed, selection }
+      : input.current;
+  if (input.pressedIsApplied && program === undefined) return null;
+  return { ...input.pressed, selection: withCodexDaybreakProgram(selection, program) };
 }
 
 export function getModelDaybreakToggleState(model: ModelOption) {

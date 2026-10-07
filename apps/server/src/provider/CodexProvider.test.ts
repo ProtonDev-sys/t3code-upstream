@@ -3,24 +3,20 @@ import { assert, it } from "@effect/vitest";
 import { applyPreferredCodexDefaultModel, mapCodexModelCapabilities } from "./CodexProvider.ts";
 
 it("advertises only approved Daybreak programs with Off as the default", () => {
-  for (const [programs, labels] of [
-    [undefined, []],
-    [[], []],
-    [["standard"], []],
-    [["daybreakBlue"], []],
-    [["daybreakRed"], []],
-    [
-      ["standard", "daybreakBlue"],
-      ["Off", "Blue"],
-    ],
-    [
-      ["standard", "daybreakRed"],
-      ["Off", "Red"],
-    ],
-    [
-      ["standard", "daybreakBlue", "daybreakRed"],
-      ["Off", "Blue", "Red"],
-    ],
+  const options = [
+    { id: "standard", label: "Off", isDefault: true },
+    { id: "daybreakBlue", label: "Blue" },
+    { id: "daybreakRed", label: "Red" },
+  ];
+  for (const [programs, supported] of [
+    [undefined, false],
+    [[], false],
+    [["standard"], false],
+    [["daybreakBlue"], false],
+    [["daybreakRed"], false],
+    [["standard", "daybreakBlue"], true],
+    [["standard", "daybreakRed"], true],
+    [["standard", "daybreakBlue", "daybreakRed"], true],
   ] as const) {
     const [descriptor] =
       mapCodexModelCapabilities({
@@ -35,22 +31,18 @@ it("advertises only approved Daybreak programs with Off as the default", () => {
         supportedReasoningEfforts: [],
         ...(programs === undefined ? {} : { availableAccessPrograms: { cyber: programs } }),
       }).optionDescriptors ?? [];
-    assert.equal(descriptor?.id, labels.length > 0 ? "cyberAccessProgram" : undefined);
     assert.deepStrictEqual(
-      descriptor?.type === "select" ? descriptor.options.map((option) => option.label) : [],
-      [...labels],
+      descriptor,
+      supported
+        ? {
+            id: "cyberAccessProgram",
+            label: "Daybreak",
+            type: "select",
+            options: options.filter(({ id }) => programs?.some((program) => program === id)),
+            currentValue: "standard",
+          }
+        : undefined,
     );
-    if (descriptor?.type === "select") {
-      assert.equal(descriptor.currentValue, "standard");
-      assert.deepStrictEqual(
-        descriptor.options.map((option) => option.id),
-        [...(programs ?? [])],
-      );
-      assert.deepStrictEqual(
-        descriptor.options.filter((option) => option.isDefault).map((option) => option.id),
-        ["standard"],
-      );
-    }
   }
 });
 

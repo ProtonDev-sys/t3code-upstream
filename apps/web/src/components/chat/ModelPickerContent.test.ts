@@ -37,7 +37,7 @@ function entry(status: ServerProvider["status"], driver = "opencode") {
 describe("Daybreak picker mode", () => {
   const luna = {
     instanceId: ProviderInstanceId.make("codex_work"),
-    model: "luna",
+    slug: "luna",
     daybreakPrograms: ["daybreakBlue"],
   };
   const claude = ProviderInstanceId.make("claude");
@@ -45,9 +45,7 @@ describe("Daybreak picker mode", () => {
   const both = [...blue, "daybreakRed"];
   const favorites = new Set([`${luna.instanceId}:luna`]);
   const models = [
-    { instanceId: luna.instanceId, slug: luna.model, daybreakPrograms: blue },
-    { instanceId: luna.instanceId, slug: "astra" },
-    { instanceId: claude, slug: "fable" },
+    luna,
     {
       instanceId: ProviderInstanceId.make("codex_red"),
       slug: "sol",
@@ -57,49 +55,46 @@ describe("Daybreak picker mode", () => {
   const reasoning = { id: "reasoningEffort", value: "high" };
   const selection = (value: string) => ({
     instanceId: luna.instanceId,
-    model: luna.model,
+    model: luna.slug,
     options: [{ ...reasoning }, { id: "cyberAccessProgram", value }],
   });
 
   it.each([
     [luna.instanceId, favorites, false, blue],
     ["favorites", favorites, false, blue],
-    [claude, favorites, false, []],
+    [claude, favorites, true, []],
     ["favorites", new Set<string>(), false, []],
     [luna.instanceId, favorites, true, both],
   ] as const)("scopes access to %s (case %#)", (instance, saved, searching, expected) => {
     expect(modelPickerDaybreakPrograms(models, instance, saved, searching)).toEqual(expected);
   });
 
-  it.each([
-    [
-      [...models, { instanceId: luna.instanceId, slug: "sol", daybreakPrograms: ["daybreakRed"] }],
-      luna.instanceId,
-    ],
-    [[{ ...models[0]!, daybreakPrograms: both }], "favorites"],
-  ] as const)("unions eligible programs in %s", (catalog, instance) => {
-    expect(modelPickerDaybreakPrograms(catalog, instance, favorites)).toEqual(both);
+  it("unions current account models and a favorite with both entitlements", () => {
+    expect(
+      modelPickerDaybreakPrograms(
+        models.map((model) => ({ ...model, instanceId: luna.instanceId })),
+        luna.instanceId,
+        favorites,
+      ),
+    ).toEqual(both);
+    expect(
+      modelPickerDaybreakPrograms([{ ...luna, daybreakPrograms: both }], "favorites", favorites),
+    ).toEqual(both);
   });
 
-  it("sets the native program only in the chosen selection, retaining reasoning", () => {
-    const current = selection("standard");
-    const selected = modelPickerSelection(luna, current, "daybreakBlue");
-    expect(selected).toEqual(selection("daybreakBlue"));
-    expect(current.options[1]?.value).toBe("standard");
-    expect(
-      modelPickerSelection(
-        { ...luna, model: "astra", daybreakPrograms: undefined },
-        current,
-        "daybreakBlue",
-      ),
-    ).toBeNull();
-    expect(modelPickerSelection(luna, selected, "standard")).toEqual(current);
-    expect(modelPickerSelection(luna, current, "daybreakRed")).toBeNull();
-    const target = { ...luna, daybreakPrograms: both };
-    const red = modelPickerSelection(target, selected, "daybreakRed");
-    expect(red).toEqual(selection("daybreakRed"));
-    expect(modelPickerSelection(target, red, "daybreakBlue")).toEqual(selected);
-    expect(modelPickerSelection(target, red, undefined)).toBe(red);
+  it.each(["daybreakBlue", "daybreakRed", "standard"])(
+    "selects %s without mutating reasoning or the current program",
+    (program) => {
+      const previous = program === "standard" ? "daybreakBlue" : "standard";
+      const current = selection(previous);
+      const target = { ...luna, daybreakPrograms: both };
+      expect(modelPickerSelection(target, current, program)).toEqual(selection(program));
+      expect(current.options[1]?.value).toBe(previous);
+    },
+  );
+
+  it("rejects a program unavailable to the selected account and model", () => {
+    expect(modelPickerSelection(luna, selection("standard"), "daybreakRed")).toBeNull();
   });
 
   it.each(["daybreakBlue", "daybreakRed"])(

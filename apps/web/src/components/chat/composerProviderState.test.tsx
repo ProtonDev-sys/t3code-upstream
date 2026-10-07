@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { getProviderOptionDescriptors } from "@t3tools/shared/model";
 import { getProviderModelCapabilities } from "../../providerModels";
+import { shouldRenderTraitsControls } from "./TraitsPicker";
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
@@ -81,21 +82,28 @@ describe("getComposerProviderState", () => {
   it.each([
     ["reasoningEffort", "high", "high"],
     ["serviceTier", "priority", null],
-  ] as const)("keeps %s independent of Daybreak access", (id, value, effort) => {
+    [null, "", null],
+  ] as const)("keeps traits independent of Daybreak access: %s", (id, value, effort) => {
     for (const available of [true, false]) {
-      const options = selections(["cyberAccessProgram", "daybreakBlue"], [id, value]);
-      const state = getComposerProviderState({
+      const options = selections(["cyberAccessProgram", "daybreakBlue"]);
+      const modelOptions = id ? [...options, { id, value }] : options;
+      const input = {
         provider: CODEX,
         model: MODEL,
         models: modelWith([
           ...(available ? [daybreak] : []),
-          selectDescriptor(id, [{ id: value, label: value, isDefault: true }]),
+          ...(id ? [selectDescriptor(id, [{ id: value, label: value, isDefault: true }])] : []),
         ]),
-        modelOptions: options,
+        modelOptions,
         planModeEnabled: true,
-      });
+        prompt: "",
+      };
+      const state = getComposerProviderState(input);
       expect(state.promptEffort).toBe(effort);
-      expect(state.modelOptionsForDispatch).toEqual(available ? options : options.slice(1));
+      expect(state.modelOptionsForDispatch ?? []).toEqual(
+        available ? modelOptions : modelOptions.slice(1),
+      );
+      if (!id) expect(shouldRenderTraitsControls(input)).toBe(false);
     }
   });
 

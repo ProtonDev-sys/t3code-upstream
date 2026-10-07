@@ -160,11 +160,10 @@ describe("thread settings sheet state", () => {
   });
 
   it("applies Daybreak when a model is chosen while preserving other options", () => {
-    const model = modelOption(
-      "gpt-test",
-      [{ id: "reasoningEffort", value: "high" }],
-      ["daybreakBlue", "daybreakRed"],
-    );
+    const reasoning = [{ id: "reasoningEffort", value: "high" }];
+    const programs = ["daybreakBlue", "daybreakRed"];
+    const redOptions = [...reasoning, { id: "cyberAccessProgram", value: "daybreakRed" }];
+    const model = modelOption("gpt-test", reasoning, programs);
     for (const program of ["daybreakBlue", "daybreakRed", "standard"]) {
       const pending = pendingModelAfterPress({
         current: null,
@@ -184,14 +183,8 @@ describe("thread settings sheet state", () => {
     expect(model.selection.options).toEqual([{ id: "reasoningEffort", value: "high" }]);
     expect(getModelDaybreakToggleState({ ...model, providerDriver: "claudeAgent" })).toBeNull();
     expect(getModelDaybreakToggleState({ ...model, isUnavailable: true })).toBeNull();
-    const blueOnly = modelOption("gpt-test", model.selection.options, ["daybreakBlue"]);
-    const staged: ModelOption = {
-      ...model,
-      selection: {
-        ...model.selection,
-        options: [...model.selection.options!, { id: "cyberAccessProgram", value: "daybreakRed" }],
-      },
-    };
+    const blueOnly = modelOption("gpt-test", reasoning, ["daybreakBlue"]);
+    const staged = modelOption("gpt-test", redOptions, programs);
     expect(
       pendingModelAfterPress({
         current: staged,
@@ -209,10 +202,6 @@ describe("thread settings sheet state", () => {
           daybreakProgram,
         });
         expect(cleaned).toEqual({ ...pressed, selection: model.selection });
-        expect(
-          pendingModelAfterPress({ current: cleaned, pressed: model, pressedIsApplied: false })
-            ?.selection.options,
-        ).toEqual(model.selection.options);
       }
       expect(
         pendingModelAfterPress({

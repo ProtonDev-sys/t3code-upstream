@@ -272,10 +272,10 @@ export function getCodexDaybreakState(
   value?: string | boolean,
 ) {
   const descriptor = descriptors?.find(
-    (candidate): candidate is Extract<ProviderOptionDescriptor, { type: "select" }> =>
-      candidate.id === "cyberAccessProgram" && candidate.type === "select",
+    (candidate) => candidate.id === "cyberAccessProgram" && candidate.type === "select",
   );
-  if (!descriptor || !descriptor.options.some((option) => option.id === "standard")) return null;
+  if (descriptor?.type !== "select") return null;
+  if (!descriptor.options.some((option) => option.id === "standard")) return null;
   const programs = (["daybreakBlue", "daybreakRed"] as const).filter((program) =>
     descriptor.options.some((option) => option.id === program),
   );
@@ -293,14 +293,14 @@ export const CODEX_DAYBREAK_CHOICES = [
   { value: "standard", label: "Off" },
 ] as const;
 
-/** Apply the chosen treatment without changing the model's other options. */
-export function withCodexDaybreakProgram(selection: ModelSelection, value: string | undefined) {
+/** Apply a treatment, clear it with null, or leave it unchanged with undefined. */
+export function withCodexDaybreakProgram(selection: ModelSelection, value?: string | null) {
   if (value === undefined) return selection;
   return {
     ...selection,
     options: [
       ...(selection.options ?? []).filter((option) => option.id !== "cyberAccessProgram"),
-      { id: "cyberAccessProgram", value },
+      ...(value === null ? [] : [{ id: "cyberAccessProgram", value }]),
     ],
   };
 }

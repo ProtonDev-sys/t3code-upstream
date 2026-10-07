@@ -93,24 +93,16 @@ export function modelPickerDaybreakPrograms(
 
 /** Attach the picker mode only when a model is chosen; changing the filter never edits a selection. */
 export function modelPickerSelection(
-  target: Pick<ModelSelection, "instanceId" | "model"> & {
-    daybreakPrograms?: ReadonlyArray<string> | undefined;
-  },
+  target: Pick<ModelPickerItem, "instanceId" | "slug" | "daybreakPrograms">,
   current: ModelSelection | null | undefined,
   program: string | undefined,
 ) {
   const selection =
-    current?.instanceId === target.instanceId && current.model === target.model
+    current?.instanceId === target.instanceId && current.model === target.slug
       ? current
-      : createModelSelection(target.instanceId, target.model);
+      : createModelSelection(target.instanceId, target.slug);
   if (program && program !== "standard" && !target.daybreakPrograms?.includes(program)) return null;
-  if (!target.daybreakPrograms?.length && selection.options) {
-    return {
-      ...selection,
-      options: selection.options.filter((option) => option.id !== "cyberAccessProgram"),
-    };
-  }
-  return withCodexDaybreakProgram(selection, target.daybreakPrograms?.length ? program : undefined);
+  return withCodexDaybreakProgram(selection, target.daybreakPrograms?.length ? program : null);
 }
 
 export function resolveModelPickerSelectedModel(input: {
@@ -707,12 +699,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       const resolvedModel = resolveSelectableModel(entry.driverKind, modelSlug, options);
       if (resolvedModel) {
         const selection = modelPickerSelection(
-          {
+          flatModels.find(
+            (model) => model.instanceId === instanceId && model.slug === resolvedModel,
+          ) ?? {
             instanceId,
-            model: resolvedModel,
-            daybreakPrograms: flatModels.find(
-              (model) => model.instanceId === instanceId && model.slug === resolvedModel,
-            )?.daybreakPrograms,
+            slug: resolvedModel,
           },
           props.modelSelection,
           props.modelSelection === undefined ? undefined : selectedDaybreakProgram,

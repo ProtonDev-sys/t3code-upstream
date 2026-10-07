@@ -24,35 +24,18 @@ import {
 } from "./model.ts";
 
 describe("Daybreak state", () => {
+  const blue = "daybreakBlue";
+  const red = "daybreakRed";
+  const standard = "standard";
   it.each([
-    [[], "standard", null],
-    [["daybreakBlue"], "standard", null],
-    [
-      ["standard", "daybreakRed", "daybreakBlue"],
-      "standard",
-      { program: "standard", programs: ["daybreakBlue", "daybreakRed"] },
-    ],
-    [
-      ["standard", "daybreakBlue"],
-      "daybreakBlue",
-      { program: "daybreakBlue", programs: ["daybreakBlue"] },
-    ],
-    [
-      ["standard", "daybreakRed"],
-      "daybreakRed",
-      { program: "daybreakRed", programs: ["daybreakRed"] },
-    ],
-    [["standard", "daybreakRed"], "standard", { program: "standard", programs: ["daybreakRed"] }],
-    [
-      ["standard", "daybreakRed"],
-      "daybreakBlue",
-      { program: "standard", programs: ["daybreakRed"] },
-    ],
-    [
-      ["standard", "daybreakBlue", "daybreakRed"],
-      "daybreakRed",
-      { program: "daybreakRed", programs: ["daybreakBlue", "daybreakRed"] },
-    ],
+    [[], standard, null],
+    [[blue], standard, null],
+    [[standard, red, blue], standard, { program: standard, programs: [blue, red] }],
+    [[standard, blue], blue, { program: blue, programs: [blue] }],
+    [[standard, red], red, { program: red, programs: [red] }],
+    [[standard, red], standard, { program: standard, programs: [red] }],
+    [[standard, red], blue, { program: standard, programs: [red] }],
+    [[standard, blue, red], red, { program: red, programs: [blue, red] }],
   ])("resolves advertised %j with saved %s", (programs, currentValue, expected) => {
     const descriptors = [
       {
@@ -65,7 +48,7 @@ describe("Daybreak state", () => {
     ];
     expect(getCodexDaybreakState(descriptors)).toEqual(expected);
     expect(
-      getCodexDaybreakState([{ ...descriptors[0]!, currentValue: "daybreakBlue" }], currentValue),
+      getCodexDaybreakState([{ ...descriptors[0]!, currentValue: blue }], currentValue),
     ).toEqual(expected);
   });
 });

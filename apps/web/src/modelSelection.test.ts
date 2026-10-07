@@ -70,6 +70,8 @@ function settingsWithProviderInstances(): UnifiedSettings {
 
 describe("remembered model options", () => {
   const selection = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.5");
+  const otherAccount = { ...selection, instanceId: ProviderInstanceId.make("other-codex") };
+  const otherModel = { ...selection, model: "other-model" };
   const reasoning = { id: "reasoning_effort", value: "high" };
   const base = provider({ instanceId: "codex", models: [selection.model] });
   const daybreak = (programs: ReadonlyArray<string>) => ({
@@ -100,17 +102,22 @@ describe("remembered model options", () => {
     ["daybreakRed", ["daybreakRed"], "daybreakRed"],
     ["standard", ["daybreakBlue"], "standard"],
     ["unknown", ["daybreakBlue"], undefined],
-  ] as const)("restores %s only with current access %j", (value, programs, expected) => {
-    const merged = mergeRememberedModelOptions(
-      selection,
-      [reasoning, { id: "cyberAccessProgram", value }],
-      catalog(programs),
-    );
-    expect(merged.options).toEqual([
-      reasoning,
-      ...(expected === undefined ? [] : [{ id: "cyberAccessProgram", value: expected }]),
-    ]);
-  });
+    ["daybreakBlue", ["daybreakBlue"], undefined, otherAccount],
+    ["daybreakBlue", ["daybreakBlue"], undefined, otherModel],
+  ] as const)(
+    "restores %s only with current access %j (case %#)",
+    (value, programs, expected, picked = selection) => {
+      const merged = mergeRememberedModelOptions(
+        picked,
+        [reasoning, { id: "cyberAccessProgram", value }],
+        catalog(programs),
+      );
+      expect(merged.options).toEqual([
+        reasoning,
+        ...(expected === undefined ? [] : [{ id: "cyberAccessProgram", value: expected }]),
+      ]);
+    },
+  );
 
   it("lets explicit options override memory and keeps unrelated options", () => {
     const explicit = [
@@ -125,19 +132,6 @@ describe("remembered model options", () => {
         catalog(["daybreakBlue", "daybreakRed"]),
       ).options,
     ).toEqual([unrelated, ...explicit]);
-  });
-
-  it.each([
-    { ...selection, instanceId: ProviderInstanceId.make("other-codex") },
-    { ...selection, model: "other-model" },
-  ])("does not borrow another account or model's access: %j", (picked) => {
-    expect(
-      mergeRememberedModelOptions(
-        picked,
-        [reasoning, { id: "cyberAccessProgram", value: "daybreakBlue" }],
-        catalog(["daybreakBlue"]),
-      ).options,
-    ).toEqual([reasoning]);
   });
 });
 
