@@ -90,7 +90,7 @@ import {
   selectableChoices,
 } from "./thread-settings-options";
 import {
-  canCommitPendingModel,
+  resolvePendingModelForCommit,
   favoritesFirst,
   getModelDaybreakToggleState,
   modelFavoriteKey,
@@ -443,7 +443,8 @@ function ThreadSettingsSessionProvider(
   );
   const commitPendingModel = useCallback(() => {
     if (pendingModel) {
-      if (!canCommitPendingModel(pendingModel, props.providerGroups)) {
+      const model = resolvePendingModelForCommit(pendingModel, props.providerGroups);
+      if (!model) {
         Alert.alert(
           "Model unavailable",
           "Set up this provider on web or desktop, or select another model.",
@@ -452,11 +453,12 @@ function ThreadSettingsSessionProvider(
       }
       void Haptics.selectionAsync();
       rememberModelOptions(
-        pendingModel.selection.instanceId,
-        pendingModel.selection.model,
-        pendingModel.selection.options ?? [],
+        model.selection.instanceId,
+        model.selection.model,
+        model.selection.options ?? [],
+        pendingModel.selection.options?.some((option) => option.id === "cyberAccessProgram"),
       );
-      props.onSelectModel(pendingModel);
+      props.onSelectModel(model);
     }
     return true;
   }, [pendingModel, props.onSelectModel, props.providerGroups]);

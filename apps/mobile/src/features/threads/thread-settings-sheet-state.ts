@@ -92,14 +92,17 @@ export function getModelDaybreakToggleState(model: ModelOption) {
     : null;
 }
 
-/** A model can disappear while the picker is open. */
-export function canCommitPendingModel(
+/** Refresh staged options against the catalog before saving; missing models cannot commit. */
+export function resolvePendingModelForCommit(
   pending: ModelOption,
   groups: ReadonlyArray<ProviderGroup>,
-): boolean {
-  return groups.some((group) =>
-    group.models.some((model) => model.key === pending.key && !model.isUnavailable),
-  );
+) {
+  const model = groups
+    .flatMap((group) => group.models)
+    .find((model) => model.key === pending.key && !model.isUnavailable);
+  return model
+    ? pendingModelAfterPress({ current: pending, pressed: model, pressedIsApplied: false })
+    : null;
 }
 
 /**

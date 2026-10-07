@@ -4,7 +4,7 @@ import { ProviderInstanceId, type ProviderOptionSelection } from "@t3tools/contr
 
 import type { ModelOption } from "../../lib/modelOptions";
 import {
-  canCommitPendingModel,
+  resolvePendingModelForCommit,
   favoritesFirst,
   getModelDaybreakToggleState,
   modelFavoriteKey,
@@ -217,15 +217,37 @@ describe("thread settings sheet state", () => {
     const pending = modelOption("gemini-native");
     const group = { providerKey: "codex", providerLabel: "Codex", models: [pending] };
 
-    expect(canCommitPendingModel(pending, [group])).toBe(true);
-    expect(canCommitPendingModel(pending, [])).toBe(false);
+    expect(resolvePendingModelForCommit(pending, [group])).toEqual(pending);
+    expect(resolvePendingModelForCommit(pending, [])).toBeNull();
     expect(
-      canCommitPendingModel(pending, [
+      resolvePendingModelForCommit(pending, [
         {
           ...group,
           models: [{ ...pending, isUnavailable: true }],
         },
       ]),
-    ).toBe(false);
+    ).toBeNull();
+  });
+
+  it("revalidates staged Daybreak access at Save without discarding other options", () => {
+    for (const reasoning of [[], [{ id: "reasoningEffort", value: "high" }]]) {
+      const options = [...reasoning, { id: "cyberAccessProgram", value: "daybreakBlue" }];
+      const pending = modelOption("gpt-test", options, ["daybreakBlue"]);
+      for (const programs of [["daybreakBlue"], ["daybreakRed"], [], undefined]) {
+        const refreshed = modelOption("gpt-test", [], programs);
+        expect(
+          resolvePendingModelForCommit(pending, [
+            { providerKey: "codex", providerLabel: "Codex", models: [refreshed] },
+          ]),
+        ).toEqual({
+          ...refreshed,
+          selection: {
+            ...pending.selection,
+            options: programs?.includes("daybreakBlue") ? options : reasoning,
+          },
+        });
+      }
+      expect(pending.selection.options).toEqual(options);
+    }
   });
 });
