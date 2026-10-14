@@ -1,5 +1,6 @@
 import type {
   OrchestrationEvent,
+  OrchestrationMessage,
   OrchestrationProject,
   OrchestrationReadModel,
   ThreadId,
@@ -10,7 +11,6 @@ import type {
 import {
   isImportedAgentSessionMessageId,
   OrchestrationCheckpointSummary,
-  OrchestrationMessage,
   OrchestrationSession,
   OrchestrationThread,
   WORKTREE_SETUP_ACTIVITY_KIND,
@@ -787,46 +787,46 @@ export function projectEvent(
           return nextBase;
         }
 
-        const message: OrchestrationMessage = yield* decodeForEvent(
-          OrchestrationMessage,
-          {
-            id: payload.messageId,
-            role: payload.role,
-            text: payload.text,
-            ...(payload.attachments !== undefined ? { attachments: payload.attachments } : {}),
-            ...(payload.context !== undefined ? { context: payload.context } : {}),
-            turnId: payload.turnId,
-            streaming: payload.streaming,
-            createdAt: payload.createdAt,
-            updatedAt: payload.updatedAt,
-          },
-          event.type,
-          "message",
-        );
+        // The payload decoder already validates and normalizes these fields.
+        const message: OrchestrationMessage = {
+          id: payload.messageId,
+          role: payload.role,
+          text: payload.text,
+          ...(payload.attachments !== undefined ? { attachments: payload.attachments } : {}),
+          ...(payload.context !== undefined ? { context: payload.context } : {}),
+          turnId: payload.turnId,
+          streaming: payload.streaming,
+          createdAt: payload.createdAt,
+          updatedAt: payload.updatedAt,
+        };
 
-        const existingMessage = thread.messages.find((entry) => entry.id === message.id);
-        const messages = existingMessage
-          ? thread.messages.map((entry) =>
-              entry.id === message.id
-                ? {
-                    ...entry,
-                    text: message.streaming
-                      ? `${entry.text}${message.text}`
-                      : message.text.length > 0
-                        ? message.text
-                        : entry.text,
-                    streaming: message.streaming,
-                    updatedAt: message.updatedAt,
-                    turnId: message.turnId,
-                    ...(message.attachments !== undefined
-                      ? { attachments: message.attachments }
-                      : {}),
-                    ...(message.context !== undefined ? { context: message.context } : {}),
-                  }
-                : entry,
-            )
-          : [...thread.messages, message];
-        const cappedMessages = messages.slice(-MAX_THREAD_MESSAGES);
+        // Streaming usually updates the tail; copy the history once instead
+        // of scanning it twice and unconditionally copying it again to cap it.
+        const messageIndex =
+          thread.messages.at(-1)?.id === message.id
+            ? thread.messages.length - 1
+            : thread.messages.findIndex((entry) => entry.id === message.id);
+        const messages = thread.messages.slice();
+        const entry = messages[messageIndex];
+        if (entry !== undefined) {
+          messages[messageIndex] = {
+            ...entry,
+            text: message.streaming
+              ? `${entry.text}${message.text}`
+              : message.text.length > 0
+                ? message.text
+                : entry.text,
+            streaming: message.streaming,
+            updatedAt: message.updatedAt,
+            turnId: message.turnId,
+            ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+            ...(message.context !== undefined ? { context: message.context } : {}),
+          };
+        } else {
+          messages.push(message);
+        }
+        const cappedMessages =
+          messages.length > MAX_THREAD_MESSAGES ? messages.slice(-MAX_THREAD_MESSAGES) : messages;
 
         return {
           ...nextBase,

@@ -401,11 +401,16 @@ export function applyThreadDetailEvent(
         updatedAt: event.payload.updatedAt,
       };
 
-      let found = false;
-      const messages = thread.messages.map((entry) => {
-        if (entry.id !== message.id) return entry;
-        found = true;
-        return {
+      // Streaming usually updates the tail. Check it first, then copy the
+      // array without visiting every historical message in a map callback.
+      const messageIndex =
+        thread.messages.at(-1)?.id === message.id
+          ? thread.messages.length - 1
+          : thread.messages.findIndex((entry) => entry.id === message.id);
+      const messages = thread.messages.slice();
+      const entry = messages[messageIndex];
+      if (entry !== undefined) {
+        messages[messageIndex] = {
           ...entry,
           text: message.streaming
             ? `${entry.text}${message.text}`
@@ -418,8 +423,9 @@ export function applyThreadDetailEvent(
           ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
           ...(message.context !== undefined ? { context: message.context } : {}),
         };
-      });
-      if (!found) messages.push(message);
+      } else {
+        messages.push(message);
+      }
       // Update latestTurn for assistant messages bound to a turn. A completed
       // assistant message only settles the turn once the session is no longer
       // running it — providers may emit several assistant messages per turn

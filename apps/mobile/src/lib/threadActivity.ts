@@ -242,6 +242,7 @@ const messageEntriesCache = new WeakMap<
   OrchestrationThread["messages"][number],
   Extract<RawThreadFeedEntry, { readonly type: "message" }>
 >();
+const feedEntryTimestamps = new WeakMap<RawThreadFeedEntry, number>();
 const activityGroupsCache = new WeakMap<ThreadFeedActivity, ThreadFeedActivityGroup>();
 const presentedActivityGroupsCache = new WeakMap<
   ThreadFeedActivityGroup,
@@ -2427,25 +2428,31 @@ export function buildThreadFeed(
         : [],
     ),
   );
-  const entries = Arr.sortWith(
-    [
-      ...messages
-        .filter((message) => message.role !== "user" || !foldedAnswerMessageIds.has(message.id))
-        .map((message) => {
-          let entry = messageEntriesCache.get(message);
-          if (!entry) {
-            entry = { type: "message", id: message.id, createdAt: message.createdAt, message };
-            messageEntriesCache.set(message, entry);
-          }
-          return entry;
-        }),
-      ...activityEntries,
-    ],
-    (s) => new Date(s.createdAt),
-    Order.Date,
-  );
+  // Text deltas rebuild this feed without changing historical entries.
+  // Reuse their parsed timestamps instead of allocating Dates per comparison.
+  const entries = [
+    ...messages
+      .filter((message) => message.role !== "user" || !foldedAnswerMessageIds.has(message.id))
+      .map((message) => {
+        let entry = messageEntriesCache.get(message);
+        if (!entry) {
+          entry = { type: "message", id: message.id, createdAt: message.createdAt, message };
+          messageEntriesCache.set(message, entry);
+        }
+        return entry;
+      }),
+    ...activityEntries,
+  ].sort((left, right) => Order.Number(feedEntryTimestamp(left), feedEntryTimestamp(right)));
 
   return groupAdjacentActivities(entries);
+}
+
+function feedEntryTimestamp(entry: RawThreadFeedEntry): number {
+  const cached = feedEntryTimestamps.get(entry);
+  if (cached !== undefined) return cached;
+  const timestamp = Date.parse(entry.createdAt);
+  feedEntryTimestamps.set(entry, timestamp);
+  return timestamp;
 }
 
 function getThreadFeedActivityEntries(activities: ReadonlyArray<OrchestrationThreadActivity>) {
