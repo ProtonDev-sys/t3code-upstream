@@ -1,20 +1,36 @@
 import * as CodexInstallation from "../CodexInstallation.ts";
+import * as CodexManagedTokenBroker from "../CodexManagedTokenBroker.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProviderInstanceId, ProviderSessionId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  MessageId,
+  NodeId,
+  ProjectId,
+  ProviderInstanceId,
+  ProviderSessionId,
+  ProviderThreadId,
+  RunAttemptId,
+  RunId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as CodexClient from "effect-codex-app-server/client";
+import * as Cause from "effect/Cause";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
@@ -59,6 +75,12 @@ const layerDeps = ServerConfig.layerTest(process.cwd(), {
   ),
   Layer.provideMerge(Layer.mock(ServerSecretStore.ServerSecretStore)({})),
   Layer.provideMerge(
+    Layer.mock(CodexManagedTokenBroker.CodexManagedTokenBroker)({
+      endpoint: Effect.succeed("unused-private-pipe"),
+      awaitIdle: Effect.void,
+    }),
+  ),
+  Layer.provideMerge(
     Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
       getEnvironmentId: Effect.succeed(EnvironmentId.make("00000000-0000-4000-8000-000000000001")),
     }),
@@ -94,12 +116,33 @@ const noSpawn = ChildProcessSpawner.make(() =>
   Effect.die("Disabled Codex must not spawn a process"),
 );
 const encodeCredentials = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+const decodeProbeRequest = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({ id: Schema.optionalKey(Schema.Number), method: Schema.String }),
+  ),
+);
 
 it.layer(layerTest)("CodexDriver", (it) => {
-  it.effect("disconnect refreshes a restored managed account while its auth flow is idle", () =>
+  const checkManagedAccount = (
+    replacementTiming:
+      | "unchanged"
+      | "during-probe"
+      | "before-open"
+      | "failed-refresh"
+      | "concurrent-first-turns",
+  ) =>
     Effect.gen(function* () {
+      const checkAccess = replacementTiming !== "unchanged";
+      const sameIdentity =
+        replacementTiming === "before-open" || replacementTiming === "failed-refresh";
       const instanceId = ProviderInstanceId.make("restored-managed-account");
       const credentials = new Map<string, Uint8Array>();
+      const catalogTokens: Array<string | undefined> = [];
+      const probeEntered = yield* Deferred.make<void>();
+      const resumeProbe = yield* Deferred.make<void>();
+      const catalogEntered = yield* Deferred.make<void>();
+      const resumeCatalog = yield* Deferred.make<void>();
+      let concurrentLookups = false;
       const secrets = ServerSecretStore.ServerSecretStore.of({
         get: (key) => Effect.sync(() => Option.fromUndefinedOr(credentials.get(key))),
         set: (key, value) =>
@@ -126,6 +169,17 @@ it.layer(layerTest)("CodexDriver", (it) => {
           email: "account@example.test",
         });
         yield* store.set(new TextEncoder().encode(json));
+        const replacement = yield* encodeCredentials({
+          clientId: sameIdentity ? "oaiapp_test" : "oaiapp_replacement",
+          subject: "replacement-user",
+          email: sameIdentity ? "account@example.test" : "replacement@example.test",
+          accessToken: "replacement-access",
+          refreshToken: "replacement-refresh",
+          expiresAt: Number.MAX_SAFE_INTEGER,
+          earliestRefreshAt: null,
+          scopes: ["chatgpt.tokens.use.direct"],
+        });
+        const replaceAccount = store.set(new TextEncoder().encode(replacement)).pipe(Effect.orDie);
         const executable = {
           executablePath: "/user/bin/codex",
           managedVersionDirectory: null,
@@ -138,13 +192,97 @@ it.layer(layerTest)("CodexDriver", (it) => {
         const launches: Array<
           Parameters<CodexAdapterV2.CodexAppServerClientFactoryShape["open"]>[0]
         > = [];
-        // Sign-out interrupts an account check that is still resolving the runtime.
-        // Interrupt the two startup checks that way (one is the sign-in listener's);
-        // the disconnect below must still refresh.
+        const nativeRequests: Array<{ readonly method: string; readonly params: unknown }> = [];
+        let accountReplaced = false;
+        let modelProbes = 0;
+        const modelSpawner = ChildProcessSpawner.make(() =>
+          Effect.gen(function* () {
+            modelProbes += 1;
+            const responses = yield* Queue.unbounded<string>();
+            yield* Effect.addFinalizer(() => Queue.shutdown(responses));
+            const results = new Map<string, unknown>([
+              [
+                "initialize",
+                {
+                  codexHome: sharedHome,
+                  platformFamily: "unix",
+                  platformOs: "linux",
+                  userAgent: "codex/0.156.1",
+                },
+              ],
+              ["account/read", { account: null, requiresOpenaiAuth: false }],
+              ["skills/list", { data: [] }],
+              ["config/read", { config: {}, origins: {} }],
+              [
+                "model/list",
+                {
+                  data: [
+                    {
+                      id: "gpt-5.4",
+                      model: "gpt-5.4",
+                      displayName: "GPT-5.4",
+                      description: "Test model",
+                      hidden: false,
+                      isDefault: true,
+                      defaultReasoningEffort: "medium",
+                      supportedReasoningEfforts: [],
+                      availableAccessPrograms: {
+                        cyber: [accountReplaced ? "daybreakBlue" : "daybreakRed"],
+                      },
+                    },
+                  ],
+                },
+              ],
+            ]);
+            const decoder = new TextDecoder();
+            let buffer = "";
+            if (replacementTiming === "during-probe" && modelProbes === 1) {
+              yield* Deferred.succeed(probeEntered, undefined);
+              yield* Deferred.await(resumeProbe);
+            }
+            return ChildProcessSpawner.makeHandle({
+              pid: ChildProcessSpawner.ProcessId(1),
+              exitCode: Effect.never,
+              isRunning: Effect.succeed(true),
+              kill: () => Effect.void,
+              unref: Effect.succeed(Effect.void),
+              stdin: Sink.forEach((chunk: Uint8Array) =>
+                Effect.gen(function* () {
+                  const lines = (buffer + decoder.decode(chunk, { stream: true })).split("\n");
+                  buffer = lines.pop()!;
+                  for (const line of lines) {
+                    const request = decodeProbeRequest(line);
+                    if (request.id === undefined) continue;
+                    expect(results.has(request.method)).toBe(true);
+                    const response = yield* encodeCredentials({
+                      id: request.id,
+                      result: results.get(request.method),
+                    });
+                    yield* Queue.offer(responses, `${response}\n`);
+                  }
+                }).pipe(Effect.orDie),
+              ),
+              stdout: Stream.fromQueue(responses).pipe(Stream.encodeText),
+              stderr: Stream.empty,
+              all: Stream.empty,
+              getInputFd: () => Sink.drain,
+              getOutputFd: () => Stream.empty,
+            });
+          }),
+        );
+
         let interruptedChecks = 0;
+        let failAcquire = false;
         const startupChecksInterrupted = yield* Deferred.make<void>();
         const acquire = () =>
           Effect.suspend(() => {
+            if (failAcquire)
+              return Effect.fail(
+                new CodexInstallation.CodexInstallationError({
+                  operation: "acquire",
+                  detail: "The fixture runtime is unavailable",
+                }),
+              );
             if (interruptedChecks === 2) return Effect.succeed(executable);
             interruptedChecks += 1;
             return (
@@ -164,9 +302,35 @@ it.layer(layerTest)("CodexDriver", (it) => {
             CodexAdapterV2.CodexAppServerClientFactory,
             CodexAdapterV2.CodexAppServerClientFactory.of({
               open: (launch) =>
-                Effect.sync(() => launches.push(launch)).pipe(
-                  Effect.andThen(Effect.die("The fixture stops after recording the launch")),
-                ),
+                Effect.gen(function* () {
+                  launches.push(launch);
+                  if (!checkAccess)
+                    return yield* Effect.die("The fixture stops after recording the launch");
+                  return yield* CodexClient.CodexAppServerClient.pipe(
+                    Effect.provide(
+                      Layer.mock(CodexClient.CodexAppServerClient)({
+                        raw: {
+                          notifications: Stream.empty,
+                          requests: Stream.empty,
+                          request: () => Effect.die("unused"),
+                          notify: () => Effect.die("unused"),
+                          respond: () => Effect.die("unused"),
+                          respondError: () => Effect.die("unused"),
+                        },
+                        request: (method, params) =>
+                          Effect.sync(() => nativeRequests.push({ method, params })).pipe(
+                            Effect.andThen(
+                              Effect.die("The fixture stops after recording the native request"),
+                            ),
+                          ),
+                        handleServerRequest: () => Effect.void,
+                        handleServerNotification: () => Effect.void,
+                        handleUnknownServerRequest: () => Effect.void,
+                        handleUnknownServerNotification: () => Effect.void,
+                      }),
+                    ),
+                  );
+                }),
             }),
           ),
           Effect.provideService(
@@ -180,15 +344,17 @@ it.layer(layerTest)("CodexDriver", (it) => {
           ),
           Effect.provideService(
             ChildProcessSpawner.ChildProcessSpawner,
-            ChildProcessSpawner.make(() =>
-              Effect.fail(
-                PlatformError.badArgument({
-                  module: "ChildProcessSpawner",
-                  method: "spawn",
-                  description: "The fixture app-server is unavailable",
-                }),
-              ),
-            ),
+            checkAccess
+              ? modelSpawner
+              : ChildProcessSpawner.make(() =>
+                  Effect.gen(function* () {
+                    return yield* PlatformError.badArgument({
+                      module: "ChildProcessSpawner",
+                      method: "spawn",
+                      description: "The fixture app-server is unavailable",
+                    });
+                  }),
+                ),
           ),
         );
         const observedAccount = yield* Deferred.make<void>();
@@ -203,14 +369,248 @@ it.layer(layerTest)("CodexDriver", (it) => {
           Effect.forkScoped,
         );
         yield* Deferred.await(startupChecksInterrupted);
-        const restored = yield* instance.snapshot.refresh;
-        expect(restored.auth.email).toBe("account@example.test");
-        expect(restored.runtimePaths?.homePath).toBe(sharedHome);
-        expect(restored.runtimePaths?.shadowHomePath).toContain(
-          `providers/codex/${instanceId}/shadow`,
+        const restored = yield* Effect.gen(function* () {
+          if (replacementTiming === "concurrent-first-turns") {
+            return yield* instance.snapshot.getSnapshot;
+          }
+          const refresh = yield* instance.snapshot.refresh.pipe(Effect.forkChild);
+          if (replacementTiming === "during-probe") {
+            yield* Deferred.await(probeEntered);
+            yield* replaceAccount;
+            accountReplaced = true;
+            yield* Deferred.succeed(resumeProbe, undefined);
+          }
+          return yield* Fiber.join(refresh);
+        });
+        if (replacementTiming === "during-probe") {
+          expect(catalogTokens).toEqual([]);
+          expect(restored.models).toEqual([]);
+          expect(restored.auth.email).toBe("replacement@example.test");
+          expect(restored.auth.profileId).toBe("oaiapp_replacement");
+        } else if (replacementTiming !== "concurrent-first-turns") {
+          expect(catalogTokens).toEqual(["Bearer dummy-owned-access"]);
+          expect(restored.auth.email).toBe("account@example.test");
+          expect(restored.runtimePaths?.homePath).toBe(sharedHome);
+          expect(restored.runtimePaths?.shadowHomePath).toContain(
+            `providers/codex/${instanceId}/shadow`,
+          );
+        }
+        if (checkAccess) {
+          const now = yield* DateTime.now;
+          const threadId = ThreadId.make("managed-daybreak-thread");
+          const providerSessionId = ProviderSessionId.make("managed-daybreak-session");
+          const providerThread: ProviderAdapter.ProviderAdapterV2TurnInput["providerThread"] = {
+            id: ProviderThreadId.make("managed-daybreak-provider-thread"),
+            driver: CodexDriver.driverKind,
+            providerInstanceId: instanceId,
+            providerSessionId,
+            appThreadId: threadId,
+            ownerNodeId: null,
+            nativeThreadRef: {
+              driver: CodexDriver.driverKind,
+              nativeId: "native-managed-thread",
+              strength: "strong",
+            },
+            nativeConversationHeadRef: null,
+            status: "idle",
+            firstRunOrdinal: null,
+            lastRunOrdinal: null,
+            handoffIds: [],
+            forkedFrom: null,
+            createdAt: now,
+            updatedAt: now,
+          };
+          const open = (program: "daybreakRed" | "daybreakBlue" | undefined) =>
+            Effect.gen(function* () {
+              const modelSelection = {
+                instanceId,
+                model: "gpt-5.4",
+                ...(program === undefined
+                  ? {}
+                  : { options: [{ id: "cyberAccessProgram", value: program }] }),
+              };
+              const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                cwd: serverConfig.stateDir,
+              });
+              const session = yield* instance.orchestrationAdapter.openSession({
+                threadId,
+                providerSessionId,
+                modelSelection,
+                runtimePolicy,
+              });
+              return { session, modelSelection, runtimePolicy };
+            });
+          const start = (
+            program: "daybreakRed" | "daybreakBlue" | undefined,
+            opened?: Effect.Success<ReturnType<typeof open>>,
+          ) =>
+            Effect.gen(function* () {
+              const { session, modelSelection, runtimePolicy } = opened ?? (yield* open(program));
+              return yield* session.startTurn({
+                appThread: {
+                  createdBy: "user",
+                  creationSource: "web",
+                  id: threadId,
+                  projectId: ProjectId.make("managed-daybreak-project"),
+                  title: "Managed Daybreak",
+                  providerInstanceId: instanceId,
+                  modelSelection,
+                  runtimeMode: "full-access",
+                  interactionMode: "default",
+                  branch: null,
+                  worktreePath: null,
+                  activeProviderThreadId: providerThread.id,
+                  lineage: {
+                    parentThreadId: null,
+                    relationshipToParent: null,
+                    rootThreadId: threadId,
+                  },
+                  forkedFrom: null,
+                  createdAt: now,
+                  updatedAt: now,
+                  archivedAt: null,
+                  settledOverride: null,
+                  settledAt: null,
+                  lastVisitedAt: null,
+                  deletedAt: null,
+                },
+                threadId,
+                runId: RunId.make("managed-daybreak-run"),
+                runOrdinal: 1,
+                providerTurnOrdinal: 1,
+                attemptId: RunAttemptId.make("managed-daybreak-attempt"),
+                rootNodeId: NodeId.make("managed-daybreak-node"),
+                providerThread,
+                message: {
+                  createdBy: "user",
+                  creationSource: "web",
+                  messageId: MessageId.make("managed-daybreak-message"),
+                  text: "test",
+                  attachments: [],
+                },
+                modelSelection,
+                runtimePolicy,
+              });
+            }).pipe(Effect.scoped, Effect.exit);
+          const concurrentStarts = (program: "daybreakRed") =>
+            Effect.gen(function* () {
+              const sessions = yield* Effect.all([open(program), open(program), open(program)], {
+                concurrency: "unbounded",
+              });
+              concurrentLookups = true;
+              const first = yield* start(program, sessions[0]).pipe(
+                Effect.forkChild({ startImmediately: true }),
+              );
+              yield* Deferred.await(catalogEntered);
+              const others = yield* Effect.forEach(sessions.slice(1), (session) =>
+                start(program, session).pipe(Effect.forkChild({ startImmediately: true })),
+              );
+              yield* Deferred.succeed(resumeCatalog, undefined);
+              return yield* Effect.forEach([first, ...others], Fiber.join);
+            });
+          if (replacementTiming === "during-probe") {
+            yield* start("daybreakBlue");
+            yield* start("daybreakBlue");
+            expect(nativeRequests).toHaveLength(2);
+            for (const request of nativeRequests) {
+              expect(request).toMatchObject({
+                method: "turn/start",
+                params: { cyberAccessProgram: "daybreakBlue" },
+              });
+            }
+            expect(modelProbes).toBe(2);
+            expect(catalogTokens).toEqual(["Bearer replacement-access"]);
+            return;
+          }
+          if (replacementTiming === "concurrent-first-turns") {
+            yield* concurrentStarts("daybreakRed");
+            expect(modelProbes).toBe(1);
+            expect(catalogTokens).toEqual(["Bearer dummy-owned-access"]);
+            expect(nativeRequests).toHaveLength(3);
+            for (const request of nativeRequests) {
+              expect(request).toMatchObject({
+                method: "turn/start",
+                params: { cyberAccessProgram: "daybreakRed" },
+              });
+            }
+            return;
+          }
+          expect(restored.models[0]?.capabilities?.optionDescriptors).toEqual([
+            {
+              id: "cyberAccessProgram",
+              label: "Daybreak",
+              type: "select",
+              options: [{ id: "daybreakRed", label: "Red" }],
+            },
+          ]);
+          yield* start("daybreakRed");
+          yield* start("daybreakRed");
+          expect(nativeRequests.map((request) => request.method)).toEqual([
+            "turn/start",
+            "turn/start",
+          ]);
+          expect(modelProbes).toBe(1);
+          expect(catalogTokens).toEqual(["Bearer dummy-owned-access"]);
+
+          yield* replaceAccount;
+          accountReplaced = true;
+          // The second account intentionally shares the visible identity and client ID.
+          // Only the runtime revision distinguishes its Daybreak access.
+          expect((yield* instance.snapshot.getSnapshot).models).toEqual(restored.models);
+          const rejectedTurns = yield* concurrentStarts("daybreakRed");
+          for (const rejected of rejectedTurns) {
+            expect(Exit.isFailure(rejected)).toBe(true);
+            expect(
+              Exit.isFailure(rejected) ? Cause.squash(rejected.cause) : undefined,
+            ).toMatchObject({
+              cause: {
+                detail: expect.stringContaining("selected Daybreak option is no longer available"),
+              },
+            });
+          }
+          expect(nativeRequests).toHaveLength(2);
+          expect(modelProbes).toBe(2);
+          expect(catalogTokens).toEqual(["Bearer dummy-owned-access", "Bearer replacement-access"]);
+          if (replacementTiming === "before-open") {
+            yield* start("daybreakRed");
+            expect(nativeRequests).toHaveLength(2);
+            yield* start("daybreakBlue");
+            expect(nativeRequests).toHaveLength(3);
+            expect(nativeRequests[2]).toMatchObject({
+              method: "turn/start",
+              params: { cyberAccessProgram: "daybreakBlue" },
+            });
+            expect(modelProbes).toBe(2);
+            expect(catalogTokens).toHaveLength(2);
+          } else {
+            yield* start(undefined);
+            yield* start(undefined);
+            expect(nativeRequests).toHaveLength(4);
+            for (const request of nativeRequests.slice(2)) {
+              expect(request.method).toBe("turn/start");
+              expect(request.params).not.toHaveProperty("cyberAccessProgram");
+            }
+            expect(modelProbes).toBe(2);
+            expect(catalogTokens).toHaveLength(2);
+          }
+          return;
+        }
+        // The fixture app-server cannot start, so the workspace scan fails
+        // instead of passing the machine snapshot off as the workspace's skills.
+        const scan = yield* instance.snapshotForCwd!(serverConfig.stateDir).pipe(Effect.exit);
+        expect(Exit.isFailure(scan)).toBe(true);
+        // The account is still signed in, so a runtime that cannot start is a
+        // failed scan too, not the machine snapshot's inventory.
+        failAcquire = true;
+        const runtimeScan = yield* instance.snapshotForCwd!(serverConfig.stateDir).pipe(
+          Effect.exit,
         );
+        failAcquire = false;
+        expect(Exit.isFailure(runtimeScan)).toBe(true);
         yield* Deferred.await(observedAccount);
-        // Sessions launch the T3-installed Codex with the account's token, not ambient credentials.
+
         const threadId = ThreadId.make("managed-account-thread");
         yield* instance.orchestrationAdapter
           .openSession({
@@ -228,7 +628,9 @@ it.layer(layerTest)("CodexDriver", (it) => {
         const launch = launches[0]!;
         expect(launch.settings.binaryPath).toBe(executable.executablePath);
         expect(launch.settings.launchArgs).toContain("openai_token_sharing");
-        expect(launch.environment.ACCESS_TOKEN).toBe("dummy-owned-access");
+        expect(launch.environment.ACCESS_TOKEN).toBeUndefined();
+        expect(launch.settings.launchArgs).toContain("__managed-chatgpt-token");
+        expect(launch.settings.launchArgs).not.toContain("dummy-owned-access");
         expect(launch.environment.OPENAI_API_KEY).toBeUndefined();
         expect(launch.environment.CODEX_HOME).toBe(launch.settings.homePath);
         const before = yield* instance.auth!.subscribe("test-owner").pipe(Stream.runHead);
@@ -240,19 +642,39 @@ it.layer(layerTest)("CodexDriver", (it) => {
         expect(after.installed).toBe(true);
         expect(after.models).toEqual([]);
         expect(Option.isNone(yield* store.get)).toBe(true);
+        // Signed out, there is no runtime to scan with, so the machine
+        // snapshot's empty inventory stands instead of a failed scan.
+        const signedOutScan = yield* instance.snapshotForCwd!(serverConfig.stateDir);
+        expect(signedOutScan.skills).toEqual([]);
       }).pipe(
         Effect.provideService(ServerSecretStore.ServerSecretStore, secrets),
         Effect.provideService(
           HttpClient.HttpClient,
           HttpClient.make((request) =>
-            Effect.sync(() => {
+            Effect.gen(function* () {
               expect([
                 "https://auth.openai.com/.well-known/openid-configuration",
                 "https://auth.openai.com/revoke",
                 "https://api.openai.com/v1/models",
               ]).toContain(request.url);
-              if (request.url.endsWith("/models"))
-                return HttpClientResponse.fromWeb(request, Response.json({ models: [] }));
+              if (request.url.endsWith("/models")) {
+                catalogTokens.push(request.headers.authorization);
+                if (concurrentLookups) {
+                  yield* Deferred.succeed(catalogEntered, undefined);
+                  yield* Deferred.await(resumeCatalog);
+                }
+                return HttpClientResponse.fromWeb(
+                  request,
+                  replacementTiming === "failed-refresh" &&
+                    request.headers.authorization === "Bearer replacement-access"
+                    ? new Response(null, { status: 503 })
+                    : Response.json({
+                        models: checkAccess
+                          ? [{ slug: "gpt-5.4", display_name: "GPT-5.4", visibility: "list" }]
+                          : [],
+                      }),
+                );
+              }
               return HttpClientResponse.fromWeb(
                 request,
                 request.url.endsWith("/revoke")
@@ -269,7 +691,19 @@ it.layer(layerTest)("CodexDriver", (it) => {
           ),
         ),
       );
-    }).pipe(Effect.scoped),
+    }).pipe(Effect.scoped);
+  // regression: a sign-in that replaces the account mid-probe must not label the old
+  // account's catalog with the new identity.
+  it.effect.each(["unchanged", "during-probe"] as const)(
+    "managed catalog keeps its account label and token together: %s",
+    checkManagedAccount,
+  );
+  it.effect.each(["before-open", "failed-refresh"] as const)(
+    "validates managed Daybreak access against the resolved account revision: %s",
+    checkManagedAccount,
+  );
+  it.effect("coalesces managed catalog checks for concurrent first turns", () =>
+    checkManagedAccount("concurrent-first-turns"),
   );
 
   it.effect.skipIf(windowsHost)(
@@ -311,22 +745,6 @@ it.layer(layerTest)("CodexDriver", (it) => {
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn),
         Effect.scoped,
       ),
-  );
-
-  it.effect("stays manual-only when the configured executable does not exist", () =>
-    Effect.gen(function* () {
-      const instance = yield* CodexDriver.create({
-        instanceId: ProviderInstanceId.make("codex-missing"),
-        displayName: "Codex test",
-        enabled: false,
-        environment: [],
-        config: {
-          ...CodexDriver.defaultConfig(),
-          binaryPath: NodePath.join(NodeOS.tmpdir(), "t3-codex-missing", "codex"),
-        },
-      });
-      expect((yield* instance.snapshot.resolveMaintenance()).update).toBeNull();
-    }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn), Effect.scoped),
   );
 
   for (const fixture of [
@@ -409,44 +827,7 @@ it.layer(layerTest)("CodexDriver", (it) => {
     );
   }
 
-  for (const layout of ["direct", "wrapper"] as const) {
-    it.effect.skipIf(windowsHost)(`leaves a mise ${layout} installation manual-only`, () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const tempDir = yield* fs
-          .makeTempDirectoryScoped({ prefix: `t3-codex-mise-${layout}-` })
-          .pipe(Effect.flatMap((directory) => fs.realPath(directory)));
-        const binaryPath =
-          layout === "direct"
-            ? NodePath.join(tempDir, "mise", "installs", "codex", "0.110.0", "codex")
-            : NodePath.join(tempDir, "omarchy", "bin", "codex");
-        yield* fs.makeDirectory(NodePath.dirname(binaryPath), { recursive: true });
-        yield* fs.writeFileString(
-          binaryPath,
-          layout === "direct"
-            ? "#!/bin/sh\n"
-            : '#!/bin/sh\nmise use -g --quiet "codex" || exit 1\nexec mise x "codex" -- "codex" "$@"\n',
-        );
-        yield* fs.chmod(binaryPath, 0o755);
-
-        const instance = yield* CodexDriver.create({
-          instanceId: ProviderInstanceId.make(`codex-mise-${layout}`),
-          displayName: "Codex mise test",
-          enabled: false,
-          environment: [],
-          config: {
-            ...CodexDriver.defaultConfig(),
-            binaryPath,
-            homePath: NodePath.join(tempDir, "codex-home"),
-          },
-        });
-
-        expect((yield* instance.snapshot.resolveMaintenance()).update).toBeNull();
-      }).pipe(
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn),
-        Effect.scoped,
-      ),
-    );
+  for (const {} of ["direct", "wrapper"] as const) {
   }
 
   it.effect.each([

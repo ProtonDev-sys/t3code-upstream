@@ -76,6 +76,13 @@ reported accounts, refresh provider status, and confirm the second instance has
 its own shadow path and login. A shadow-home conflict usually means the directory
 contains a copied Codex setup. Use a fresh shadow directory and sign in again.
 
+## Use Daybreak
+
+For an eligible account and model, choose **Daybreak** from the thread's model
+traits, or **Options** on mobile. Select **Blue**, **Red**, or **Off**; locked
+choices are unavailable for that account and model. Choose **Off** to return to
+standard access when the model supports it.
+
 ## Answer questions while Codex works
 
 Codex can ask a question and keep working. Answer it in the thread's question

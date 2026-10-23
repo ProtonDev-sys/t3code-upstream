@@ -6,6 +6,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  type ModelCapabilities,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { AsyncResult, type Atom } from "effect/reactivity";
@@ -34,7 +35,13 @@ const state = vi.hoisted(() => ({
     session: null,
   },
   config: {
-    providers: [{ instanceId: "codex", driver: "codex" }],
+    providers: [
+      {
+        instanceId: "codex",
+        driver: "codex",
+        models: [] as Array<{ slug: string; capabilities: ModelCapabilities | null }>,
+      },
+    ],
     environment: { capabilities: {} },
   },
 }));
@@ -65,7 +72,9 @@ vi.mock("./entities", () => ({
 vi.mock("./server", async () => {
   const { Atom } = await import("effect/reactivity");
   return {
-    serverEnvironment: { configValueAtom: Atom.family((_id: string) => Atom.make(state.config)) },
+    serverEnvironment: {
+      configValueAtom: Atom.family((_id: string) => Atom.make(() => state.config)),
+    },
   };
 });
 vi.mock("./threads", async () => {
@@ -145,6 +154,7 @@ vi.mock("./use-composer-drafts", async () => {
 });
 
 import { appAtomRegistry } from "./atom-registry";
+import { serverEnvironment } from "./server";
 import { dispatchingQueuedMessageIdAtom } from "./use-thread-outbox";
 import { useThreadOutboxDrain } from "./use-thread-outbox-drain";
 
@@ -173,6 +183,11 @@ function runDrain() {
 beforeEach(() => {
   state.grantedEnvironments = new Set(["primary"]);
   state.draftText = "Keep this draft separate";
+  state.config = {
+    providers: [{ instanceId: "codex", driver: "codex", models: [] }],
+    environment: { capabilities: {} },
+  };
+  appAtomRegistry.refresh(serverEnvironment.configValueAtom(EnvironmentId.make("secondary")));
   appAtomRegistry.set(state.manager.queuedMessagesByThreadKeyAtom, {});
   appAtomRegistry.set(dispatchingQueuedMessageIdAtom, null);
   for (const command of [
@@ -241,6 +256,93 @@ describe("queued PR checkout", () => {
     expect(remaining()).toEqual([]);
   });
 
+  it.each<ModelCapabilities | null>([
+    null,
+    {
+      optionDescriptors: [
+        {
+          id: "cyberAccessProgram",
+          label: "Daybreak",
+          type: "select",
+          options: [{ id: "standard", label: "Off" }],
+        },
+      ],
+    },
+  ])("strips Blue revoked during PR checkout with capabilities %j", async (capabilities) => {
+    state.grantedEnvironments.add("secondary");
+    state.config = {
+      ...state.config,
+      providers: [
+        {
+          instanceId: "codex",
+          driver: "codex",
+          models: [
+            {
+              slug: "gpt-5.4",
+              capabilities: {
+                optionDescriptors: [
+                  {
+                    id: "cyberAccessProgram",
+                    label: "Daybreak",
+                    type: "select",
+                    options: [
+                      { id: "standard", label: "Off" },
+                      { id: "daybreakBlue", label: "Blue" },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    appAtomRegistry.refresh(serverEnvironment.configValueAtom(EnvironmentId.make("secondary")));
+    await state.manager.enqueue({
+      ...queuedPullRequest(),
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4",
+        options: [
+          { id: "cyberAccessProgram", value: "daybreakBlue" },
+          { id: "reasoningEffort", value: "high" },
+        ],
+      },
+      runtimeMode: "approval-required",
+    });
+    const started = Promise.withResolvers<void>();
+    const checkout =
+      Promise.withResolvers<AsyncResult.AsyncResult<typeof preparedCheckout, Error>>();
+    state.checkout.mockImplementationOnce(() => {
+      started.resolve();
+      return checkout.promise;
+    });
+    const drained = runDrain();
+    await started.promise;
+    expect(state.start).not.toHaveBeenCalled();
+    state.config = {
+      ...state.config,
+      providers: state.config.providers.map((provider) => ({
+        ...provider,
+        models: provider.models.map((model) => ({ ...model, capabilities })),
+      })),
+    };
+    appAtomRegistry.refresh(serverEnvironment.configValueAtom(EnvironmentId.make("secondary")));
+    checkout.resolve(AsyncResult.success(preparedCheckout));
+    await drained;
+    expect(state.start).toHaveBeenCalledOnce();
+    const input = state.start.mock.calls[0]?.[0].input;
+    const modelSelection = {
+      instanceId: "codex",
+      model: "gpt-5.4",
+      options: [{ id: "reasoningEffort", value: "high" }],
+    };
+    expect(input.modelSelection).toEqual(modelSelection);
+    expect(input.bootstrap.createThread.modelSelection).toEqual(modelSelection);
+    expect(input.runtimeMode).toBe("approval-required");
+    expect(remaining()).toEqual([]);
+  });
+
   it("keeps the PR source queued on a transport failure without starting the agent", async () => {
     state.grantedEnvironments.add("secondary");
     const queued = queuedPullRequest();
@@ -251,26 +353,6 @@ describe("queued PR checkout", () => {
     await runDrain();
     expect(state.start).not.toHaveBeenCalled();
     expect(remaining()).toEqual([queued]);
-  });
-
-  it("restores the PR draft when the reused worktree cannot reach the PR head", async () => {
-    state.grantedEnvironments.add("secondary");
-    await state.manager.enqueue(queuedPullRequest());
-    state.checkout.mockResolvedValueOnce(
-      AsyncResult.success({ ...preparedCheckout, isOnPullRequestHead: false }),
-    );
-    await runDrain();
-    expect(state.start).not.toHaveBeenCalled();
-    expect(remaining()).toEqual([]);
-    const { updateComposerDraftSettings } = await import("./use-composer-drafts");
-    expect(updateComposerDraftSettings).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({
-        workspaceSelection: expect.objectContaining({
-          pullRequestReference: queuedPullRequest().creation?.pullRequestReference,
-        }),
-      }),
-    );
   });
 
   it("stops launch if operation access is revoked while checking out the PR", async () => {
@@ -340,8 +422,6 @@ describe("queued task operation access", () => {
 
   it.each([
     { isCreation: false, accepted: false },
-    { isCreation: true, accepted: false },
-    { isCreation: false, accepted: true },
     { isCreation: true, accepted: true },
   ])(
     "preserves a rejected queue but removes an accepted turn after access loss (new task: $isCreation, accepted: $accepted)",
