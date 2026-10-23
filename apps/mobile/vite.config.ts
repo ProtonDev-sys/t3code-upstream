@@ -9,6 +9,7 @@ const reactTests = [
   "src/native/useRestingTopOffset.test.tsx",
   "src/state/use-selected-thread-git-actions.test.tsx",
   "src/state/use-revalidated-model-options.test.tsx",
+  "src/features/threads/new-task-flow-provider.test.tsx",
 ];
 
 export default defineConfig({

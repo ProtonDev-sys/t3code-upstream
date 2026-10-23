@@ -4,6 +4,7 @@ import { resolveFilesystemReadAccess } from "@t3tools/client-runtime/state/files
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { environmentSession } from "../../state/session";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
 
 import type {
   EnvironmentId,
@@ -61,6 +62,7 @@ import {
   getComposerDraftSnapshot,
   isComposerDraftEmpty,
   isNewTaskDraftKey,
+  modelOptionMemoryAtom,
   removeComposerDraftAttachment,
   replaceComposerDraftAttachments,
   retargetNewTaskDraft,
@@ -76,7 +78,10 @@ import {
   capturePendingTaskEditorWriteBaseline,
   flushPendingTaskEditorWrite,
 } from "../../state/pending-task-editor-writes";
-import { rememberModelOptions } from "../../state/use-model-option-memory";
+import {
+  rememberModelOptions,
+  withRememberedModelOptions,
+} from "../../state/use-model-option-memory";
 import { useRevalidatedModelOptions } from "../../state/use-revalidated-model-options";
 import { useBranches, useDebouncedValue, usePaginatedBranches } from "../../state/queries";
 import { vcsEnvironment } from "../../state/vcs";
@@ -126,6 +131,14 @@ import { resolveProjectThreadCreationBranch } from "./projectThreadCreationValid
 type WorkspaceMode = "local" | "worktree";
 
 const BRANCH_SEARCH_DEBOUNCE_MS = 150;
+
+function withoutUnownedDaybreakSelection(selection: ModelSelection): ModelSelection {
+  if (!selection.options?.some((option) => option.id === "cyberAccessProgram")) return selection;
+  return {
+    ...selection,
+    options: selection.options.filter((option) => option.id !== "cyberAccessProgram"),
+  };
+}
 
 function pendingTaskDraftKey(messageId: string): string {
   return `pending-task:${messageId}`;
@@ -587,12 +600,22 @@ export function NewTaskFlowProvider(
     selectedProject?.id ?? null,
   );
 
-  const selectedModel = resolveNewTaskModelSelection({
+  // Hydration can load option memory without changing the draft or sticky model.
+  useAtomValue(modelOptionMemoryAtom);
+  const resolvedModel = resolveNewTaskModelSelection({
     draftSelection: draftModelSelection,
     projectDefaultSelection: projectDefaultModelSelection,
-    stickySelection: stickyModelSelection,
+    stickySelection: stickyModelSelection
+      ? withoutUnownedDaybreakSelection(stickyModelSelection)
+      : null,
     modelOptions,
   });
+  const selectedModel =
+    draftModelSelection ??
+    projectDefaultModelSelection ??
+    (resolvedModel
+      ? withRememberedModelOptions(resolvedModel, selectedProject?.environmentId ?? null)
+      : null);
   const selectedModelKey = selectedModel
     ? `${selectedModel.instanceId}:${selectedModel.model}`
     : null;
@@ -672,8 +695,10 @@ export function NewTaskFlowProvider(
     ownerKey: selectedProjectDraftKey,
     environmentId: selectedProject?.environmentId ?? null,
     selection:
-      storedStickyModelSelection?.instanceId === selectedModel?.instanceId &&
-      storedStickyModelSelection?.model === selectedModel?.model
+      storedStickyModelSelection &&
+      selectedModel &&
+      storedStickyModelSelection.instanceId === selectedModel.instanceId &&
+      storedStickyModelSelection.model === selectedModel.model
         ? storedStickyModelSelection
         : null,
     provider: selectedProviderStatus,
@@ -742,7 +767,18 @@ export function NewTaskFlowProvider(
   const carryDraftContentTo = (project: EnvironmentProject) => {
     const target = { environmentId: project.environmentId, projectId: project.id };
     if (activeDraftKey !== null && isNewTaskDraftKey(activeDraftKey)) {
+      const draft = getComposerDraftSnapshot(activeDraftKey);
+      const selection = draft.modelSelection;
       retargetNewTaskDraft(activeDraftKey, target);
+      if (draft.project?.environmentId !== project.environmentId && selection) {
+        // Options belong to the destination account even when both servers use the same IDs.
+        updateComposerDraftSettings(activeDraftKey, {
+          modelSelection: withRememberedModelOptions(
+            withoutUnownedDaybreakSelection(selection),
+            project.environmentId,
+          ),
+        });
+      }
     } else if (!editingPendingTaskRef.current) {
       setActiveDraftKey(createNewTaskDraft(target));
     }
